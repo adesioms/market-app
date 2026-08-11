@@ -4,6 +4,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 
 import Dashboard from '../screens/Dashboard';
+import ShoppingList from '../screens/ShoppingList';
 import AddPurchase from '../screens/AddPurchase';
 import History from '../screens/History';
 import Comparator from '../screens/Comparator';
@@ -29,6 +30,14 @@ function HomeStack() {
   );
 }
 
+function ShoppingListStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ShoppingListMain" component={ShoppingList} />
+    </Stack.Navigator>
+  );
+}
+
 function HistoryStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -46,6 +55,8 @@ export default function AppNavigator() {
 
           if (route.name === 'Home') {
             iconName = focused ? 'home' : 'home-outline';
+          } else if (route.name === 'Lista') {
+            iconName = focused ? 'cart' : 'cart-outline';
           } else if (route.name === 'Historico') {
             iconName = focused ? 'list' : 'list-outline';
           }
@@ -71,6 +82,11 @@ export default function AppNavigator() {
         name="Home" 
         component={HomeStack}
         options={{ title: 'Início' }}
+      />
+      <Tab.Screen 
+        name="Lista" 
+        component={ShoppingListStack}
+        options={{ title: 'Lista' }}
       />
       <Tab.Screen 
         name="Historico" 
