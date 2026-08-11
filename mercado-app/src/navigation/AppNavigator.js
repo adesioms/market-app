@@ -8,6 +8,7 @@ import ShoppingList from '../screens/ShoppingList';
 import AddPurchase from '../screens/AddPurchase';
 import History from '../screens/History';
 import Comparator from '../screens/Comparator';
+import MasterListScreen from '../screens/MasterListScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -46,6 +47,14 @@ function HistoryStack() {
   );
 }
 
+function MasterListStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="MasterListMain" component={MasterListScreen} />
+    </Stack.Navigator>
+  );
+}
+
 export default function AppNavigator() {
   return (
     <Tab.Navigator
@@ -55,8 +64,10 @@ export default function AppNavigator() {
 
           if (route.name === 'Home') {
             iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Lista') {
+          } else if (route.name === 'ListaCompras') {
             iconName = focused ? 'cart' : 'cart-outline';
+          } else if (route.name === 'Mestra') {
+            iconName = focused ? 'star' : 'star-outline';
           } else if (route.name === 'Historico') {
             iconName = focused ? 'list' : 'list-outline';
           }
@@ -84,9 +95,14 @@ export default function AppNavigator() {
         options={{ title: 'Início' }}
       />
       <Tab.Screen 
-        name="Lista" 
+        name="ListaCompras" 
         component={ShoppingListStack}
         options={{ title: 'Lista' }}
+      />
+      <Tab.Screen 
+        name="Mestra" 
+        component={MasterListStack}
+        options={{ title: 'Mestra' }}
       />
       <Tab.Screen 
         name="Historico" 
