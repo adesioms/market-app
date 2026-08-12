@@ -1,10 +1,10 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import DashboardScreen from './src/screens/DashboardScreen';
-import ShoppingListScreen from './src/screens/ShoppingListScreen';
-import MasterListScreen from './src/screens/MasterListScreen';
-import HistoryScreen from './src/screens/HistoryScreen';
+import DashboardScreen from '../screens/DashboardScreen';
+import ShoppingListScreen from '../screens/ShoppingListScreen';
+import MasterListScreen from '../screens/MasterListScreen';
+import HistoryScreen from '../screens/HistoryScreen';
 
 const Tab = createBottomTabNavigator();
 
