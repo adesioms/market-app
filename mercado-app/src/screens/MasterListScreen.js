@@ -1,533 +1,176 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  FlatList,
-  Modal,
-  TextInput,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { 
-  getMasterList, 
-  addToMasterList, 
-  removeFromMasterList,
-  addToShoppingList
-} from '../utils/storage';
+import { getMasterList, addToMasterList, removeFromMasterList, CATEGORIES } from '../utils/storage';
 
-const CATEGORIES = [
-  { id: 'hortifruti', name: 'Hortifruti', icon: 'leaf', color: '#4CAF50' },
-  { id: 'carnes', name: 'Carnes', icon: 'restaurant', color: '#F44336' },
-  { id: 'laticinios', name: 'Laticínios', icon: 'wine', color: '#FF9800' },
-  { id: 'padaria', name: 'Padaria', icon: 'pizza', color: '#FFC107' },
-  { id: 'bebidas', name: 'Bebidas', icon: 'beer', color: '#2196F3' },
-  { id: 'limpeza', name: 'Limpeza', icon: 'water', color: '#00BCD4' },
-  { id: 'higiene', name: 'Higiene', icon: 'body', color: '#E91E63' },
-  { id: 'outros', name: 'Outros', icon: 'grid', color: '#9E9E9E' },
-];
-
-export default function MasterListScreen({ navigation }) {
+export default function MasterListScreen() {
   const [masterList, setMasterList] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
-  const [itemName, setItemName] = useState('');
-  const [itemBrand, setItemBrand] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('outros');
-  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  const [newItem, setNewItem] = useState({ name: '', brand: '', category: 'outros' });
 
   useEffect(() => {
-    loadMasterList();
+    loadList();
   }, []);
 
-  const loadMasterList = async () => {
+  const loadList = async () => {
     const list = await getMasterList();
     setMasterList(list);
   };
 
-  const openAddModal = () => {
-    setItemName('');
-    setItemBrand('');
-    setSelectedCategory('outros');
-    setModalVisible(true);
-  };
-
-  const handleSaveItem = async () => {
-    if (!itemName.trim()) {
-      Alert.alert('Atenção', 'Digite o nome do produto');
+  const handleAddItem = async () => {
+    if (!newItem.name.trim()) {
+      Alert.alert('Erro', 'Digite o nome do produto');
       return;
     }
-
-    const itemData = {
-      name: itemName.trim(),
-      brand: itemBrand.trim(),
-      categoryId: selectedCategory,
-    };
-
-    try {
-      await addToMasterList(itemData);
-      setModalVisible(false);
-      setItemName('');
-      setItemBrand('');
-      setSelectedCategory('outros');
-      loadMasterList();
-      Alert.alert('Sucesso', 'Produto cadastrado na lista mestra!');
-    } catch (error) {
-      Alert.alert('Erro', error.message || 'Erro ao salvar item');
-    }
+    await addToMasterList(newItem);
+    setNewItem({ name: '', brand: '', category: 'outros' });
+    setModalVisible(false);
+    loadList();
   };
 
-  const handleDeleteItem = (id) => {
-    Alert.alert(
-      'Excluir produto',
-      'Tem certeza que deseja remover este produto da lista mestra?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: async () => {
-            await removeFromMasterList(id);
-            loadMasterList();
-          },
-        },
-      ]
-    );
+  const handleDelete = async (id) => {
+    Alert.alert('Confirmar', 'Remover este produto da lista mestra?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Remover', style: 'destructive', onPress: async () => {
+        await removeFromMasterList(id);
+        loadList();
+      }}
+    ]);
   };
 
-  const handleAddToShoppingList = async (item) => {
-    try {
-      await addToShoppingList({
-        name: item.name,
-        brand: item.brand,
-        categoryId: item.categoryId,
-      });
-      Alert.alert(
-        'Adicionado!',
-        `"${item.name}" foi adicionado à sua lista de compras.`,
-        [{ text: 'OK' }]
-      );
-      navigation.navigate('ListaCompras');
-    } catch (error) {
-      Alert.alert('Erro', 'Erro ao adicionar à lista de compras');
-    }
+  const renderCategoryIcon = (categoryId) => {
+    const cat = CATEGORIES.find(c => c.id === categoryId);
+    return cat ? cat.icon : 'grid';
   };
 
-  const getCategoryInfo = (catId) => {
-    return CATEGORIES.find(c => c.id === catId) || CATEGORIES[7];
-  };
-
-  const renderMasterItem = ({ item }) => {
-    const category = getCategoryInfo(item.categoryId);
-    
-    return (
-      <View style={styles.itemCard}>
-        <View style={styles.itemLeft}>
-          <View style={[styles.categoryIcon, { backgroundColor: category.color + '20' }]}>
-            <Ionicons name={category.icon} size={20} color={category.color} />
-          </View>
-          <View style={styles.itemTextContainer}>
-            <Text style={styles.itemName}>{item.name}</Text>
-            {item.brand && (
-              <Text style={styles.itemBrand}>{item.brand}</Text>
-            )}
-            <Text style={styles.itemCategory}>{category.name}</Text>
-          </View>
+  const renderItem = ({ item }) => (
+    <View style={styles.itemCard}>
+      <View style={styles.itemLeft}>
+        <View style={[styles.itemIcon, { backgroundColor: CATEGORIES.find(c => c.id === item.category)?.color || '#9E9E9E' }]}>
+          <Ionicons name={renderCategoryIcon(item.category)} size={20} color="#fff" />
         </View>
-        
-        <View style={styles.itemActions}>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => handleAddToShoppingList(item)}
-            title="Adicionar à lista"
-          >
-            <Ionicons name="cart-outline" size={22} color="#4CAF50" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => handleDeleteItem(item.id)}
-          >
-            <Ionicons name="trash-outline" size={22} color="#F44336" />
-          </TouchableOpacity>
+        <View style={styles.itemInfo}>
+          <Text style={styles.itemName}>{item.name}</Text>
+          {item.brand && (
+            <Text style={styles.itemBrand}>{item.brand}</Text>
+          )}
+          <Text style={styles.itemCategory}>
+            {CATEGORIES.find(c => c.id === item.category)?.name || 'Outros'}
+          </Text>
         </View>
       </View>
-    );
-  };
+      <TouchableOpacity onPress={() => handleDelete(item.id)}>
+        <Ionicons name="trash-outline" size={20} color="#F44336" />
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
+    <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Lista Mestra</Text>
-        <Text style={styles.headerSubtitle}>
-          Cadastre seus produtos recorrentes para facilitar as compras
-        </Text>
+        <Text style={styles.headerSubtitle}>Produtos recorrentes</Text>
       </View>
 
-      {masterList.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="star-outline" size={80} color="#333" />
-          <Text style={styles.emptyTitle}>Sua lista mestra está vazia</Text>
-          <Text style={styles.emptySubtitle}>
-            Adicione produtos que você compra frequentemente
-          </Text>
-          <TouchableOpacity style={styles.addButtonLarge} onPress={openAddModal}>
-            <Ionicons name="add" size={24} color="#fff" />
-            <Text style={styles.addButtonTextLarge}>Cadastrar Primeiro Produto</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <FlatList
-          data={masterList}
-          renderItem={renderMasterItem}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
-
-      <TouchableOpacity style={styles.fab} onPress={openAddModal}>
-        <Ionicons name="add" size={32} color="#fff" />
+      <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
+        <Ionicons name="add" size={24} color="#fff" />
+        <Text style={styles.addButtonText}>Adicionar Produto</Text>
       </TouchableOpacity>
 
-      {/* Add Item Modal */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setModalVisible(false)}
-      >
+      {masterList.length > 0 ? (
+        <FlatList
+          data={masterList}
+          renderItem={renderItem}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.listContent}
+        />
+      ) : (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="star-outline" size={64} color="#8888aa" />
+          <Text style={styles.emptyText}>Sua lista mestra está vazia</Text>
+          <Text style={styles.emptySubtext}>Adicione produtos que você compra frequentemente</Text>
+        </View>
+      )}
+
+      <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Novo Produto</Text>
-
-            <Text style={styles.label}>Nome do Produto</Text>
+            <Text style={styles.modalTitle}>Adicionar à Lista Mestra</Text>
+            
             <TextInput
               style={styles.input}
-              value={itemName}
-              onChangeText={setItemName}
-              placeholder="Ex: Arroz, Leite, Papel..."
-              placeholderTextColor="#666"
-              autoFocus
+              placeholder="Nome do produto"
+              placeholderTextColor="#8888aa"
+              value={newItem.name}
+              onChangeText={(text) => setNewItem({...newItem, name: text})}
             />
-
-            <Text style={styles.label}>Marca (opcional)</Text>
+            
             <TextInput
               style={styles.input}
-              value={itemBrand}
-              onChangeText={setItemBrand}
-              placeholder="Ex: Tio João, Nestlé, Sadia..."
-              placeholderTextColor="#666"
+              placeholder="Marca (ex: Tio João, Nestlé)"
+              placeholderTextColor="#8888aa"
+              value={newItem.brand}
+              onChangeText={(text) => setNewItem({...newItem, brand: text})}
             />
-
+            
             <Text style={styles.label}>Categoria</Text>
-            <TouchableOpacity
-              style={styles.categorySelector}
-              onPress={() => setCategoryModalVisible(true)}
-            >
-              <View style={[styles.categoryDot, { backgroundColor: getCategoryInfo(selectedCategory).color }]} />
-              <Text style={styles.categorySelectorText}>
-                {getCategoryInfo(selectedCategory).name}
-              </Text>
-              <Ionicons name="chevron-down" size={20} color="#888" />
-            </TouchableOpacity>
-
+            <View style={styles.categorySelector}>
+              {CATEGORIES.map(cat => (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[styles.categoryChip, newItem.category === cat.id && { backgroundColor: cat.color }]}
+                  onPress={() => setNewItem({...newItem, category: cat.id})}
+                >
+                  <Ionicons name={cat.icon} size={16} color="#fff" />
+                  <Text style={styles.categoryChipText}>{cat.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            
             <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.modalButtonText}>Cancelar</Text>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleSaveItem}
-              >
-                <Text style={[styles.modalButtonText, { color: '#fff' }]}>Salvar</Text>
+              <TouchableOpacity style={styles.saveButton} onPress={handleAddItem}>
+                <Text style={styles.saveButtonText}>Salvar</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
-
-      {/* Category Picker Modal */}
-      <Modal
-        visible={categoryModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setCategoryModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Selecione a Categoria</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
-              {CATEGORIES.map(cat => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={[
-                    styles.categoryOption,
-                    selectedCategory === cat.id && styles.categoryOptionSelected
-                  ]}
-                  onPress={() => {
-                    setSelectedCategory(cat.id);
-                    setCategoryModalVisible(false);
-                  }}
-                >
-                  <View style={[styles.categoryDot, { backgroundColor: cat.color }]} />
-                  <Ionicons name={cat.icon} size={20} color={cat.color} />
-                  <Text style={styles.categoryOptionText}>{cat.name}</Text>
-                  {selectedCategory === cat.id && (
-                    <Ionicons name="checkmark" size={20} color="#4CAF50" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity
-              style={[styles.modalButton, styles.cancelButton, { marginTop: 15 }]}
-              onPress={() => setCategoryModalVisible(false)}
-            >
-              <Text style={styles.modalButtonText}>Cancelar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f0f1a',
-  },
-  header: {
-    padding: 20,
-    paddingTop: Platform.OS === 'android' ? 50 : 20,
-    backgroundColor: '#1a1a2e',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a3e',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#888',
-    marginTop: 5,
-  },
-  listContent: {
-    padding: 15,
-    paddingBottom: 100,
-  },
-  itemCard: {
-    backgroundColor: '#1a1a2e',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#2a2a3e',
-  },
-  itemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  categoryIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  itemTextContainer: {
-    flex: 1,
-  },
-  itemName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  itemBrand: {
-    fontSize: 14,
-    color: '#888',
-    marginTop: 2,
-  },
-  itemCategory: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 4,
-  },
-  itemActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4CAF5020',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deleteButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F4433620',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fab: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#4CAF50',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 30,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 20,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 10,
-    marginBottom: 30,
-  },
-  addButtonLarge: {
-    flexDirection: 'row',
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderRadius: 25,
-    alignItems: 'center',
-    gap: 10,
-  },
-  addButtonTextLarge: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#1a1a2e',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 25,
-    maxHeight: '85%',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  label: {
-    fontSize: 14,
-    color: '#ccc',
-    marginBottom: 8,
-    marginTop: 10,
-  },
-  input: {
-    backgroundColor: '#2a2a3e',
-    borderRadius: 8,
-    padding: 12,
-    color: '#fff',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#3a3a4e',
-  },
-  categorySelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2a2a3e',
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#3a3a4e',
-    gap: 10,
-  },
-  categoryDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  categorySelectorText: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 20,
-  },
-  modalButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  cancelButton: {
-    backgroundColor: '#3a3a4e',
-  },
-  saveButton: {
-    backgroundColor: '#4CAF50',
-  },
-  modalButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  categoryOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a3e',
-    gap: 12,
-  },
-  categoryOptionSelected: {
-    backgroundColor: '#2a2a3e',
-  },
-  categoryOptionText: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 16,
-  },
+  container: { flex: 1, backgroundColor: '#0f0f1a' },
+  header: { padding: 16, backgroundColor: '#1a1a2e' },
+  headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  headerSubtitle: { color: '#8888aa', fontSize: 14, marginTop: 4 },
+  addButton: { margin: 16, flexDirection: 'row', backgroundColor: '#FF9800', padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  addButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
+  listContent: { paddingHorizontal: 16 },
+  itemCard: { backgroundColor: '#1a1a2e', padding: 12, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center' },
+  itemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  itemIcon: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  itemInfo: { flex: 1 },
+  itemName: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  itemBrand: { color: '#8888aa', fontSize: 14 },
+  itemCategory: { color: '#4CAF50', fontSize: 12, marginTop: 4 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { color: '#fff', fontSize: 18, marginTop: 16 },
+  emptySubtext: { color: '#8888aa', fontSize: 14, marginTop: 8 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#1a1a2e', padding: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  modalTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
+  input: { backgroundColor: '#2a2a3e', color: '#fff', padding: 12, borderRadius: 8, marginBottom: 12 },
+  label: { color: '#fff', fontSize: 14, marginBottom: 8 },
+  categorySelector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  categoryChip: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#2a2a3e', borderRadius: 20, alignItems: 'center', gap: 6 },
+  categoryChipText: { color: '#fff', fontSize: 14 },
+  modalButtons: { flexDirection: 'row', gap: 12 },
+  cancelButton: { flex: 1, backgroundColor: '#2a2a3e', padding: 16, borderRadius: 8, alignItems: 'center' },
+  cancelButtonText: { color: '#fff', fontSize: 16 },
+  saveButton: { flex: 1, backgroundColor: '#FF9800', padding: 16, borderRadius: 8, alignItems: 'center' },
+  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 });
