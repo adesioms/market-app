@@ -1,15 +1,17 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { getShoppingList, addToShoppingList, removeFromShoppingList, markAsPurchased, searchSuggestions, CATEGORIES, UNITS } from '../utils/storage';
+import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, searchSuggestions, getPurchaseDefaults, CATEGORIES, UNITS } from '../utils/storage';
 
 export default function ShoppingListScreen() {
   const [shoppingList, setShoppingList] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
   const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [newItem, setNewItem] = useState({ name: '', brand: '', category: 'outros' });
+  const [editingItem, setEditingItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [purchaseData, setPurchaseData] = useState({ price: '', quantity: '1', unit: 'un', isPromotion: false, originalPrice: '' });
@@ -79,9 +81,53 @@ export default function ShoppingListScreen() {
     }
   };
 
+  const handleOpenEditItem = (item) => {
+    setEditingItem({
+      id: item.id,
+      name: item.name || '',
+      brand: item.brand || '',
+      category: item.category || 'outros'
+    });
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEditedItem = async () => {
+    const name = editingItem?.name.trim();
+    if (!name) {
+      Alert.alert('Erro', 'Digite o nome do produto');
+      return;
+    }
+
+    const saved = await updateShoppingItem(editingItem.id, {
+      name,
+      brand: editingItem.brand.trim(),
+      category: editingItem.category
+    });
+
+    if (!saved) {
+      Alert.alert('Erro', 'Não foi possível salvar as alterações. Tente novamente.');
+      return;
+    }
+
+    setEditModalVisible(false);
+    setEditingItem(null);
+    loadList();
+  };
+
   const handleOpenPurchase = (item) => {
+    const defaults = getPurchaseDefaults(item.category);
+    const unit = defaults.unit === 'kg' && item.unit === 'un'
+      ? defaults.unit
+      : (item.unit || defaults.unit);
+
     setSelectedItem(item);
-    setPurchaseData({ price: '', quantity: '1', unit: 'un', isPromotion: false, originalPrice: '' });
+    setPurchaseData({
+      price: '',
+      quantity: String(item.quantity ?? defaults.quantity),
+      unit,
+      isPromotion: false,
+      originalPrice: ''
+    });
     setPurchaseModalVisible(true);
   };
 
@@ -91,17 +137,22 @@ export default function ShoppingListScreen() {
       return;
     }
     
-    await markAsPurchased(selectedItem.id, {
+    const purchased = await markAsPurchased(selectedItem.id, {
       price: parseFloat(purchaseData.price),
       quantity: parseFloat(purchaseData.quantity) || 1,
       unit: purchaseData.unit,
       isPromotion: purchaseData.isPromotion,
       originalPrice: purchaseData.isPromotion ? parseFloat(purchaseData.originalPrice) : null
     });
-    
+
+    if (!purchased) {
+      Alert.alert('Erro', 'Não foi possível registrar a compra. Tente novamente.');
+      return;
+    }
+
     setPurchaseModalVisible(false);
+    setSelectedItem(null);
     loadList();
-    Alert.alert('Sucesso', 'Produto marcado como comprado!');
   };
 
   const handleDelete = async (id) => {
@@ -127,48 +178,56 @@ export default function ShoppingListScreen() {
   const pendingItems = shoppingList.filter(item => item.status === 'pending');
   const purchasedItems = shoppingList.filter(item => item.status === 'purchased');
 
-  const renderCategoryIcon = (categoryId) => {
-    const cat = CATEGORIES.find(c => c.id === categoryId);
-    return cat ? cat.icon : 'grid';
-  };
+  const renderItem = ({ item }) => {
+    const category = CATEGORIES.find(c => c.id === item.category);
 
-  const renderItem = ({ item }) => (
-    <View style={[styles.itemCard, item.status === 'purchased' && styles.itemPurchased]}>
-      <View style={styles.itemLeft}>
-        <View style={[styles.itemIcon, { backgroundColor: CATEGORIES.find(c => c.id === item.category)?.color || '#9E9E9E' }]}>
-          <Ionicons name={renderCategoryIcon(item.category)} size={20} color="#fff" />
-        </View>
-        <View style={styles.itemInfo}>
-          <Text style={[styles.itemName, item.status === 'purchased' && styles.itemTextPurchased]}>
-            {item.name}
-          </Text>
-          {item.brand && (
-            <Text style={[styles.itemBrand, item.status === 'purchased' && styles.itemTextPurchased]}>
-              {item.brand}
+    return (
+      <View style={[styles.itemCard, item.status === 'purchased' && styles.itemPurchased]}>
+        <TouchableOpacity
+          accessibilityLabel={`Editar ${item.name}`}
+          style={styles.itemLeft}
+          onPress={() => handleOpenEditItem(item)}
+        >
+          <View style={[styles.itemIcon, { backgroundColor: category?.color || '#9E9E9E' }]}>
+            <MaterialCommunityIcons name={category?.icon || 'shape-outline'} size={20} color="#fff" />
+          </View>
+          <View style={styles.itemInfo}>
+            <Text style={[styles.itemName, item.status === 'purchased' && styles.itemTextPurchased]}>
+              {item.name}
             </Text>
-          )}
-          {item.status === 'purchased' && item.price && (
-            <Text style={styles.itemPrice}>
-              R$ {(item.price * item.quantity).toFixed(2)}
-              {item.isPromotion && <Text style={styles.promotionBadge}> PROMO</Text>}
-            </Text>
-          )}
-        </View>
-      </View>
-      <View style={styles.itemActions}>
-        {item.status === 'pending' ? (
-          <TouchableOpacity style={styles.buyButton} onPress={() => handleOpenPurchase(item)}>
-            <Ionicons name="cart" size={20} color="#fff" />
-          </TouchableOpacity>
-        ) : (
-          <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-        )}
-        <TouchableOpacity onPress={() => handleDelete(item.id)}>
-          <Ionicons name="trash-outline" size={20} color="#F44336" />
+            {item.brand ? (
+              <Text style={[styles.itemBrand, item.status === 'purchased' && styles.itemTextPurchased]}>
+                {item.brand}
+              </Text>
+            ) : null}
+            <Text style={styles.itemCategory}>{category?.name || 'Outros'}</Text>
+            {item.status === 'purchased' && item.price && (
+              <Text style={styles.itemPrice}>
+                R$ {(item.price * item.quantity).toFixed(2)}
+                {item.isPromotion && <Text style={styles.promotionBadge}> PROMO</Text>}
+              </Text>
+            )}
+          </View>
         </TouchableOpacity>
+        <View style={styles.itemActions}>
+          {item.status === 'pending' ? (
+            <TouchableOpacity
+              accessibilityLabel={`Registrar compra de ${item.name}`}
+              style={styles.buyButton}
+              onPress={() => handleOpenPurchase(item)}
+            >
+              <Ionicons name="cart" size={20} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+          )}
+          <TouchableOpacity accessibilityLabel={`Remover ${item.name}`} onPress={() => handleDelete(item.id)}>
+            <Ionicons name="trash-outline" size={20} color="#F44336" />
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -222,9 +281,10 @@ export default function ShoppingListScreen() {
       )}
 
       {/* Modal Adicionar Item */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={styles.formModalContent}>
+            <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitle}>Adicionar à Lista</Text>
             
             <TextInput
@@ -261,6 +321,7 @@ export default function ShoppingListScreen() {
                   style={[styles.categoryChip, newItem.category === cat.id && { backgroundColor: cat.color }]}
                   onPress={() => setNewItem({...newItem, category: cat.id})}
                 >
+                  <MaterialCommunityIcons name={cat.icon} size={16} color="#fff" />
                   <Text style={styles.categoryChipText}>{cat.name}</Text>
                 </TouchableOpacity>
               ))}
@@ -274,6 +335,57 @@ export default function ShoppingListScreen() {
                 <Text style={styles.saveButtonText}>Salvar</Text>
               </TouchableOpacity>
             </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={editModalVisible} animationType="slide" transparent onRequestClose={() => setEditModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.formModalContent}>
+            <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalTitle}>Editar Item</Text>
+
+              <TextInput
+                style={styles.input}
+                placeholder="Nome do produto"
+                placeholderTextColor="#8888aa"
+                value={editingItem?.name || ''}
+                onChangeText={(name) => setEditingItem({ ...editingItem, name })}
+                autoFocus
+              />
+
+              <TextInput
+                style={styles.input}
+                placeholder="Marca (opcional)"
+                placeholderTextColor="#8888aa"
+                value={editingItem?.brand || ''}
+                onChangeText={(brand) => setEditingItem({ ...editingItem, brand })}
+              />
+
+              <Text style={styles.label}>Categoria</Text>
+              <View style={styles.categorySelector}>
+                {CATEGORIES.map(cat => (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[styles.categoryChip, editingItem?.category === cat.id && { backgroundColor: cat.color }]}
+                    onPress={() => setEditingItem({ ...editingItem, category: cat.id })}
+                  >
+                    <MaterialCommunityIcons name={cat.icon} size={16} color="#fff" />
+                    <Text style={styles.categoryChipText}>{cat.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setEditModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveButton} onPress={handleSaveEditedItem}>
+                  <Text style={styles.saveButtonText}>Salvar Alterações</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -284,10 +396,11 @@ export default function ShoppingListScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Registrar Compra</Text>
             <Text style={styles.purchaseProductName}>{selectedItem?.name}</Text>
+            {selectedItem?.brand ? <Text style={styles.purchaseProductBrand}>{selectedItem.brand}</Text> : null}
             
             <TextInput
               style={styles.input}
-              placeholder="Preço (R$)"
+              placeholder={`Preço por ${purchaseData.unit} (R$)`}
               placeholderTextColor="#8888aa"
               keyboardType="numeric"
               value={purchaseData.price}
@@ -297,7 +410,7 @@ export default function ShoppingListScreen() {
             <View style={styles.row}>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
-                placeholder="Quantidade"
+                placeholder={`Quantidade (${purchaseData.unit})`}
                 placeholderTextColor="#8888aa"
                 keyboardType="numeric"
                 value={purchaseData.quantity}
@@ -396,6 +509,7 @@ const styles = StyleSheet.create({
   itemInfo: { flex: 1 },
   itemName: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   itemBrand: { color: '#8888aa', fontSize: 14 },
+  itemCategory: { color: '#8888aa', fontSize: 12, marginTop: 2 },
   itemPrice: { color: '#4CAF50', fontSize: 14, fontWeight: 'bold', marginTop: 4 },
   itemTextPurchased: { textDecorationLine: 'line-through' },
   promotionBadge: { backgroundColor: '#FF9800', color: '#fff', fontSize: 10, paddingHorizontal: 4, borderRadius: 4, marginLeft: 4 },
@@ -406,8 +520,11 @@ const styles = StyleSheet.create({
   emptySubtext: { color: '#8888aa', fontSize: 14, marginTop: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#1a1a2e', padding: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  formModalContent: { backgroundColor: '#1a1a2e', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%' },
+  modalScrollContent: { padding: 24 },
   modalTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
-  purchaseProductName: { color: '#4CAF50', fontSize: 18, textAlign: 'center', marginBottom: 16 },
+  purchaseProductName: { color: '#4CAF50', fontSize: 18, textAlign: 'center', marginBottom: 4 },
+  purchaseProductBrand: { color: '#8888aa', fontSize: 14, textAlign: 'center', marginBottom: 16 },
   input: { backgroundColor: '#2a2a3e', color: '#fff', padding: 12, borderRadius: 8, marginBottom: 12 },
   row: { flexDirection: 'row', gap: 8 },
   unitButton: { backgroundColor: '#2a2a3e', padding: 12, borderRadius: 8, justifyContent: 'center', minWidth: 80, alignItems: 'center' },
@@ -427,8 +544,9 @@ const styles = StyleSheet.create({
   suggestionItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#3a3a4e' },
   suggestionName: { color: '#fff', fontSize: 16 },
   suggestionBrand: { color: '#8888aa', fontSize: 14 },
+  label: { color: '#fff', fontSize: 14, marginBottom: 8 },
   categorySelector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  categoryChip: { paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#2a2a3e', borderRadius: 20 },
+  categoryChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#2a2a3e', borderRadius: 20 },
   categoryChipText: { color: '#fff', fontSize: 14 },
   unitOption: { padding: 16, backgroundColor: '#2a2a3e', borderRadius: 8, marginBottom: 8, alignItems: 'center' },
   unitOptionSelected: { backgroundColor: '#4CAF50' },

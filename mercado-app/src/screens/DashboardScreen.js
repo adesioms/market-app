@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { PieChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
 import { getDashboardStats, CATEGORIES } from '../utils/storage';
@@ -96,7 +96,7 @@ export default function DashboardScreen() {
           {CATEGORIES.map((cat) => (
             <View key={cat.id} style={styles.categoryItem}>
               <View style={[styles.categoryIcon, { backgroundColor: cat.color }]}>
-                <Ionicons name={cat.icon} size={20} color="#fff" />
+                <MaterialCommunityIcons name={cat.icon} size={20} color="#fff" />
               </View>
               <Text style={styles.categoryName}>{cat.name}</Text>
             </View>

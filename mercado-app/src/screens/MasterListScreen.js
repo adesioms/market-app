@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getMasterList, addToMasterList, updateMasterListItem, removeFromMasterList, addToShoppingList, CATEGORIES } from '../utils/storage';
 
 const EMPTY_ITEM = { name: '', brand: '', category: 'outros' };
@@ -94,9 +94,7 @@ export default function MasterListScreen() {
       category: item.category || 'outros'
     });
 
-    if (addedItem) {
-      Alert.alert('Adicionado à lista', `${item.name} foi incluído na lista de compras.`);
-    } else {
+    if (!addedItem) {
       Alert.alert('Erro', 'Não foi possível adicionar o produto à lista de compras. Tente novamente.');
     }
   };
@@ -108,20 +106,20 @@ export default function MasterListScreen() {
 
     return (
       <View style={styles.itemCard}>
-        <TouchableOpacity
-          accessibilityLabel={`Adicionar ${item.name} à lista de compras`}
-          style={styles.itemLeft}
-          onPress={() => handleAddToShoppingList(item)}
-        >
+        <View style={styles.itemLeft}>
           <View style={[styles.itemIcon, { backgroundColor: category?.color || '#9E9E9E' }]}>
-            <Ionicons name={category?.icon || 'grid'} size={20} color="#fff" />
+            <MaterialCommunityIcons name={category?.icon || 'shape-outline'} size={20} color="#fff" />
           </View>
-          <View style={styles.itemInfo}>
+          <TouchableOpacity
+            accessibilityLabel={`Editar ${item.name}`}
+            style={styles.itemInfo}
+            onPress={() => handleOpenEdit(item)}
+          >
             <Text style={styles.itemName}>{item.name}</Text>
             {item.brand ? <Text style={styles.itemBrand}>{item.brand}</Text> : null}
             <Text style={styles.itemCategory}>{category?.name || 'Outros'}</Text>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
         <View style={styles.itemActions}>
           <TouchableOpacity
             accessibilityLabel={`Adicionar ${item.name} à lista de compras`}
@@ -129,13 +127,6 @@ export default function MasterListScreen() {
             onPress={() => handleAddToShoppingList(item)}
           >
             <Ionicons name="cart-outline" size={20} color="#4CAF50" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityLabel={`Editar ${item.name}`}
-            style={styles.editButton}
-            onPress={() => handleOpenEdit(item)}
-          >
-            <Ionicons name="pencil-outline" size={20} color="#2196F3" />
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityLabel={`Remover ${item.name}`}
@@ -153,7 +144,7 @@ export default function MasterListScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Lista Mestra</Text>
-        <Text style={styles.headerSubtitle}>Produtos recorrentes</Text>
+        <Text style={styles.headerSubtitle}>Toque no produto para editar</Text>
       </View>
 
       <TouchableOpacity style={styles.addButton} onPress={handleOpenAdd}>
@@ -212,7 +203,7 @@ export default function MasterListScreen() {
                     ]}
                     onPress={() => setFormItem({ ...formItem, category: category.id })}
                   >
-                    <Ionicons name={category.icon} size={16} color="#fff" />
+                    <MaterialCommunityIcons name={category.icon} size={16} color="#fff" />
                     <Text style={styles.categoryChipText}>{category.name}</Text>
                   </TouchableOpacity>
                 ))}
@@ -245,13 +236,12 @@ const styles = StyleSheet.create({
   itemCard: { backgroundColor: '#1a1a2e', padding: 12, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center' },
   itemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   itemIcon: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  itemInfo: { flex: 1 },
+  itemInfo: { flex: 1, paddingVertical: 4 },
   itemName: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   itemBrand: { color: '#8888aa', fontSize: 14 },
   itemCategory: { color: '#4CAF50', fontSize: 12, marginTop: 4 },
   itemActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   addToShoppingButton: { padding: 8 },
-  editButton: { padding: 8 },
   deleteButton: { padding: 8 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: '#fff', fontSize: 18, marginTop: 16 },

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { getPurchaseHistory, removeFromPurchaseHistory, CATEGORIES } from '../utils/storage';
 
@@ -86,7 +86,7 @@ export default function HistoryScreen() {
     const catConfig = CATEGORIES.find(c => c.id === category) || CATEGORIES[0];
     return (
       <View style={[styles.badge, { backgroundColor: catConfig.color + '30' }]}>
-        <Ionicons name={catConfig.icon} size={12} color={catConfig.color} />
+        <MaterialCommunityIcons name={catConfig.icon} size={12} color={catConfig.color} />
         <Text style={[styles.badgeText, { color: catConfig.color }]}>{catConfig.name}</Text>
       </View>
     );
@@ -239,7 +239,7 @@ export default function HistoryScreen() {
                   ]}
                   onPress={() => setSelectedCategory(cat.id)}
                 >
-                  <Ionicons name={cat.icon} size={16} color={selectedCategory === cat.id ? cat.color : '#888'} />
+                  <MaterialCommunityIcons name={cat.icon} size={16} color={selectedCategory === cat.id ? cat.color : '#888'} />
                   <Text style={[
                     styles.catChipText,
                     selectedCategory === cat.id && { color: cat.color }

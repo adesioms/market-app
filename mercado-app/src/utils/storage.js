@@ -8,17 +8,17 @@ const STORAGE_KEYS = {
 
 export const CATEGORIES = [
   { id: 'hortifruti', name: 'Hortifruti', icon: 'leaf', color: '#43A047' },
-  { id: 'despensa', name: 'Despensa e Mercearia', icon: 'basket', color: '#8D6E63' },
-  { id: 'laticinios_ovos', name: 'Laticínios e Ovos', icon: 'nutrition', color: '#FB8C00' },
-  { id: 'proteinas', name: 'Proteínas', icon: 'restaurant', color: '#E53935' },
-  { id: 'padaria_cafe', name: 'Padaria e Café', icon: 'cafe', color: '#F9A825' },
-  { id: 'bebidas', name: 'Bebidas', icon: 'water', color: '#1E88E5' },
-  { id: 'snacks_doces', name: 'Snacks, Doces e Conveniência', icon: 'fast-food', color: '#8E24AA' },
-  { id: 'congelados', name: 'Congelados e Prontos', icon: 'snow', color: '#5E35B1' },
-  { id: 'limpeza', name: 'Limpeza', icon: 'brush', color: '#00ACC1' },
-  { id: 'higiene_cuidados', name: 'Higiene e Cuidados', icon: 'heart', color: '#D81B60' },
-  { id: 'casa_pet', name: 'Casa e Pet', icon: 'home', color: '#00897B' },
-  { id: 'outros', name: 'Outros', icon: 'grid', color: '#757575' }
+  { id: 'despensa', name: 'Despensa e Mercearia', icon: 'basket-outline', color: '#8D6E63' },
+  { id: 'laticinios_ovos', name: 'Laticínios e Ovos', icon: 'egg-outline', color: '#FB8C00' },
+  { id: 'proteinas', name: 'Proteínas', icon: 'food-drumstick-outline', color: '#E53935' },
+  { id: 'padaria_cafe', name: 'Padaria e Café', icon: 'coffee-outline', color: '#F9A825' },
+  { id: 'bebidas', name: 'Bebidas', icon: 'bottle-soda-outline', color: '#1E88E5' },
+  { id: 'snacks_doces', name: 'Snacks, Doces e Conveniência', icon: 'popcorn', color: '#8E24AA' },
+  { id: 'congelados', name: 'Congelados e Prontos', icon: 'snowflake', color: '#5E35B1' },
+  { id: 'limpeza', name: 'Limpeza', icon: 'spray-bottle', color: '#00ACC1' },
+  { id: 'higiene_cuidados', name: 'Higiene e Cuidados', icon: 'human', color: '#D81B60' },
+  { id: 'casa_pet', name: 'Casa e Pet', icon: 'home-outline', color: '#00897B' },
+  { id: 'outros', name: 'Outros', icon: 'shape-outline', color: '#757575' }
 ];
 
 const LEGACY_CATEGORY_MAP = {
@@ -43,7 +43,18 @@ const normalizeItemCategory = (item) => ({
   category: normalizeCategoryId(item.category)
 });
 
-export const UNITS = ['un', 'kg', 'g', 'L', 'mL', 'm', 'cx', 'pacote'];
+export const UNITS = ['un', 'dz', 'kg', 'g', 'L', 'mL', 'm', 'cx', 'pacote'];
+
+const CATEGORY_PURCHASE_DEFAULTS = {
+  hortifruti: { quantity: '1', unit: 'kg' },
+  proteinas: { quantity: '1', unit: 'kg' },
+  laticinios_ovos: { quantity: '1', unit: 'un' }
+};
+
+export const getPurchaseDefaults = (categoryId) => {
+  const category = normalizeCategoryId(categoryId);
+  return CATEGORY_PURCHASE_DEFAULTS[category] || { quantity: '1', unit: 'un' };
+};
 
 // Lista Mestra
 export const getMasterList = async () => {
@@ -130,15 +141,17 @@ export const saveShoppingList = async (items) => {
 export const addToShoppingList = async (item) => {
   try {
     const current = await getShoppingList();
-    const newItem = { 
+    const category = normalizeCategoryId(item.category);
+    const defaults = getPurchaseDefaults(category);
+    const newItem = {
       ...item,
-      category: normalizeCategoryId(item.category),
+      category,
       id: Date.now().toString(),
       status: 'pending', // pending, purchased
       purchaseDate: null,
       price: null,
-      quantity: 1,
-      unit: 'un',
+      quantity: item.quantity ?? defaults.quantity,
+      unit: item.unit ?? defaults.unit,
       isPromotion: false,
       originalPrice: null
     };
@@ -153,8 +166,10 @@ export const addToShoppingList = async (item) => {
 export const updateShoppingItem = async (id, updates) => {
   try {
     const current = await getShoppingList();
-    const updated = current.map(item => 
-      item.id === id ? { ...item, ...updates } : item
+    const updated = current.map(item =>
+      item.id === id
+        ? { ...item, ...updates, category: normalizeCategoryId(updates.category ?? item.category) }
+        : item
     );
     await saveShoppingList(updated);
     return true;
