@@ -23,13 +23,34 @@ export default function ShoppingListScreen() {
     setShoppingList(list);
   };
 
+  const handleOpenAddItem = () => {
+    setNewItem({ name: '', brand: '', category: 'outros' });
+    setSearchQuery('');
+    setSuggestions([]);
+    setModalVisible(true);
+  };
+
   const handleAddItem = async () => {
-    if (!newItem.name.trim()) {
+    const name = newItem.name.trim();
+    if (!name) {
       Alert.alert('Erro', 'Digite o nome do produto');
       return;
     }
-    await addToShoppingList(newItem);
+
+    const addedItem = await addToShoppingList({
+      name,
+      brand: newItem.brand.trim(),
+      category: newItem.category
+    });
+
+    if (!addedItem) {
+      Alert.alert('Erro', 'Não foi possível adicionar o produto. Tente novamente.');
+      return;
+    }
+
     setNewItem({ name: '', brand: '', category: 'outros' });
+    setSearchQuery('');
+    setSuggestions([]);
     setModalVisible(false);
     loadList();
   };
@@ -45,6 +66,7 @@ export default function ShoppingListScreen() {
   };
 
   const handleSearch = async (text) => {
+    setNewItem(current => ({ ...current, name: text }));
     setSearchQuery(text);
     if (text.length >= 2) {
       const results = await searchSuggestions(text);
@@ -157,7 +179,7 @@ export default function ShoppingListScreen() {
       </View>
 
       {/* Botão Adicionar */}
-      <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
+      <TouchableOpacity style={styles.addButton} onPress={handleOpenAddItem}>
         <Ionicons name="add" size={24} color="#fff" />
         <Text style={styles.addButtonText}>Adicionar Item</Text>
       </TouchableOpacity>
@@ -230,7 +252,7 @@ export default function ShoppingListScreen() {
             />
             
             <View style={styles.categorySelector}>
-              {CATEGORIES.slice(0, 4).map(cat => (
+              {CATEGORIES.map(cat => (
                 <TouchableOpacity
                   key={cat.id}
                   style={[styles.categoryChip, newItem.category === cat.id && { backgroundColor: cat.color }]}

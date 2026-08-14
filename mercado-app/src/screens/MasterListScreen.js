@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getMasterList, addToMasterList, updateMasterListItem, removeFromMasterList, CATEGORIES } from '../utils/storage';
+import { getMasterList, addToMasterList, updateMasterListItem, removeFromMasterList, addToShoppingList, CATEGORIES } from '../utils/storage';
 
 const EMPTY_ITEM = { name: '', brand: '', category: 'outros' };
 
@@ -87,6 +87,20 @@ export default function MasterListScreen() {
     ]);
   };
 
+  const handleAddToShoppingList = async (item) => {
+    const addedItem = await addToShoppingList({
+      name: item.name,
+      brand: item.brand || '',
+      category: item.category || 'outros'
+    });
+
+    if (addedItem) {
+      Alert.alert('Adicionado à lista', `${item.name} foi incluído na lista de compras.`);
+    } else {
+      Alert.alert('Erro', 'Não foi possível adicionar o produto à lista de compras. Tente novamente.');
+    }
+  };
+
   const getCategory = (categoryId) => CATEGORIES.find(category => category.id === categoryId);
 
   const renderItem = ({ item }) => {
@@ -105,6 +119,13 @@ export default function MasterListScreen() {
           </View>
         </View>
         <View style={styles.itemActions}>
+          <TouchableOpacity
+            accessibilityLabel={`Adicionar ${item.name} à lista de compras`}
+            style={styles.addToShoppingButton}
+            onPress={() => handleAddToShoppingList(item)}
+          >
+            <Ionicons name="cart-outline" size={20} color="#4CAF50" />
+          </TouchableOpacity>
           <TouchableOpacity
             accessibilityLabel={`Editar ${item.name}`}
             style={styles.editButton}
@@ -225,6 +246,7 @@ const styles = StyleSheet.create({
   itemBrand: { color: '#8888aa', fontSize: 14 },
   itemCategory: { color: '#4CAF50', fontSize: 12, marginTop: 4 },
   itemActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  addToShoppingButton: { padding: 8 },
   editButton: { padding: 8 },
   deleteButton: { padding: 8 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
