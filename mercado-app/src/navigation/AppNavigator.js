@@ -5,6 +5,7 @@ import DashboardScreen from '../screens/DashboardScreen';
 import ShoppingListScreen from '../screens/ShoppingListScreen';
 import MasterListScreen from '../screens/MasterListScreen';
 import HistoryScreen from '../screens/HistoryScreen';
+import PriceComparatorScreen from '../screens/PriceComparatorScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -19,6 +20,8 @@ export default function AppNavigator() {
             iconName = focused ? 'home' : 'home-outline';
           } else if (route.name === 'Lista') {
             iconName = focused ? 'cart' : 'cart-outline';
+          } else if (route.name === 'Comparar') {
+            iconName = focused ? 'git-compare' : 'git-compare-outline';
           } else if (route.name === 'Mestra') {
             iconName = focused ? 'star' : 'star-outline';
           } else if (route.name === 'Histórico') {
@@ -49,8 +52,13 @@ export default function AppNavigator() {
         component={ShoppingListScreen}
         options={{ title: 'Lista de Compras' }}
       />
-      <Tab.Screen 
-        name="Mestra" 
+      <Tab.Screen
+        name="Comparar"
+        component={PriceComparatorScreen}
+        options={{ title: 'Comparar Preços' }}
+      />
+      <Tab.Screen
+        name="Mestra"
         component={MasterListScreen}
         options={{ title: 'Lista Mestra' }}
       />
