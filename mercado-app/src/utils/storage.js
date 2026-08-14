@@ -7,21 +7,41 @@ const STORAGE_KEYS = {
 };
 
 export const CATEGORIES = [
-  { id: 'hortifruti', name: 'Hortifruti', icon: 'leaf', color: '#4CAF50' },
-  { id: 'carnes', name: 'Carnes', icon: 'restaurant', color: '#F44336' },
-  { id: 'laticinios', name: 'Laticínios', icon: 'cube', color: '#FF9800' },
-  { id: 'frios', name: 'Frios e Embutidos', icon: 'fast-food', color: '#EF5350' },
-  { id: 'padaria', name: 'Padaria', icon: 'pizza', color: '#FFC107' },
-  { id: 'mercearia', name: 'Mercearia', icon: 'basket', color: '#8D6E63' },
-  { id: 'congelados', name: 'Congelados', icon: 'snow', color: '#5C6BC0' },
-  { id: 'bebidas', name: 'Bebidas', icon: 'wine', color: '#2196F3' },
-  { id: 'limpeza', name: 'Limpeza', icon: 'water', color: '#00BCD4' },
-  { id: 'higiene', name: 'Higiene', icon: 'body', color: '#E91E63' },
-  { id: 'bebe', name: 'Bebê', icon: 'happy', color: '#F06292' },
-  { id: 'pet', name: 'Pet', icon: 'paw', color: '#AB47BC' },
-  { id: 'casa', name: 'Casa e Utilidades', icon: 'home', color: '#26A69A' },
-  { id: 'outros', name: 'Outros', icon: 'grid', color: '#9E9E9E' }
+  { id: 'hortifruti', name: 'Hortifruti', icon: 'leaf', color: '#43A047' },
+  { id: 'despensa', name: 'Despensa e Mercearia', icon: 'basket', color: '#8D6E63' },
+  { id: 'laticinios_ovos', name: 'Laticínios e Ovos', icon: 'nutrition', color: '#FB8C00' },
+  { id: 'proteinas', name: 'Proteínas', icon: 'restaurant', color: '#E53935' },
+  { id: 'padaria_cafe', name: 'Padaria e Café', icon: 'cafe', color: '#F9A825' },
+  { id: 'bebidas', name: 'Bebidas', icon: 'water', color: '#1E88E5' },
+  { id: 'snacks_doces', name: 'Snacks, Doces e Conveniência', icon: 'fast-food', color: '#8E24AA' },
+  { id: 'congelados', name: 'Congelados e Prontos', icon: 'snow', color: '#5E35B1' },
+  { id: 'limpeza', name: 'Limpeza', icon: 'brush', color: '#00ACC1' },
+  { id: 'higiene_cuidados', name: 'Higiene e Cuidados', icon: 'heart', color: '#D81B60' },
+  { id: 'casa_pet', name: 'Casa e Pet', icon: 'home', color: '#00897B' },
+  { id: 'outros', name: 'Outros', icon: 'grid', color: '#757575' }
 ];
+
+const LEGACY_CATEGORY_MAP = {
+  carnes: 'proteinas',
+  laticinios: 'laticinios_ovos',
+  frios: 'proteinas',
+  padaria: 'padaria_cafe',
+  mercearia: 'despensa',
+  higiene: 'higiene_cuidados',
+  bebe: 'higiene_cuidados',
+  pet: 'casa_pet',
+  casa: 'casa_pet'
+};
+
+const normalizeCategoryId = (categoryId) => {
+  const migratedCategory = LEGACY_CATEGORY_MAP[categoryId] || categoryId;
+  return CATEGORIES.some(category => category.id === migratedCategory) ? migratedCategory : 'outros';
+};
+
+const normalizeItemCategory = (item) => ({
+  ...item,
+  category: normalizeCategoryId(item.category)
+});
 
 export const UNITS = ['un', 'kg', 'g', 'L', 'mL', 'm', 'cx', 'pacote'];
 
@@ -29,7 +49,7 @@ export const UNITS = ['un', 'kg', 'g', 'L', 'mL', 'm', 'cx', 'pacote'];
 export const getMasterList = async () => {
   try {
     const data = await AsyncStorage.getItem(STORAGE_KEYS.MASTER_LIST);
-    return data ? JSON.parse(data) : [];
+    return data ? JSON.parse(data).map(normalizeItemCategory) : [];
   } catch (error) {
     console.error('Erro ao buscar lista mestra:', error);
     return [];
@@ -49,7 +69,7 @@ export const saveMasterList = async (items) => {
 export const addToMasterList = async (item) => {
   try {
     const current = await getMasterList();
-    const newItem = { ...item, id: Date.now().toString() };
+    const newItem = { ...item, category: normalizeCategoryId(item.category), id: Date.now().toString() };
     await saveMasterList([...current, newItem]);
     return newItem;
   } catch (error) {
@@ -74,7 +94,9 @@ export const updateMasterListItem = async (id, updates) => {
   try {
     const current = await getMasterList();
     const updated = current.map(item =>
-      item.id === id ? { ...item, ...updates } : item
+      item.id === id
+        ? { ...item, ...updates, category: normalizeCategoryId(updates.category ?? item.category) }
+        : item
     );
     await saveMasterList(updated);
     return true;
@@ -88,7 +110,7 @@ export const updateMasterListItem = async (id, updates) => {
 export const getShoppingList = async () => {
   try {
     const data = await AsyncStorage.getItem(STORAGE_KEYS.SHOPPING_LIST);
-    return data ? JSON.parse(data) : [];
+    return data ? JSON.parse(data).map(normalizeItemCategory) : [];
   } catch (error) {
     console.error('Erro ao buscar lista de compras:', error);
     return [];
@@ -109,7 +131,8 @@ export const addToShoppingList = async (item) => {
   try {
     const current = await getShoppingList();
     const newItem = { 
-      ...item, 
+      ...item,
+      category: normalizeCategoryId(item.category),
       id: Date.now().toString(),
       status: 'pending', // pending, purchased
       purchaseDate: null,
@@ -191,7 +214,7 @@ export const markAsPurchased = async (id, purchaseData) => {
 export const getPurchaseHistory = async () => {
   try {
     const data = await AsyncStorage.getItem(STORAGE_KEYS.PURCHASE_HISTORY);
-    return data ? JSON.parse(data) : [];
+    return data ? JSON.parse(data).map(normalizeItemCategory) : [];
   } catch (error) {
     console.error('Erro ao buscar histórico:', error);
     return [];
@@ -211,7 +234,7 @@ export const savePurchaseHistory = async (items) => {
 export const addToPurchaseHistory = async (item) => {
   try {
     const current = await getPurchaseHistory();
-    const newItem = { ...item, id: Date.now().toString() };
+    const newItem = { ...item, category: normalizeCategoryId(item.category), id: Date.now().toString() };
     await savePurchaseHistory([newItem, ...current]);
     return newItem;
   } catch (error) {

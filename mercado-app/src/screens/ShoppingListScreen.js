@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { getShoppingList, addToShoppingList, removeFromShoppingList, markAsPurchased, searchSuggestions, CATEGORIES, UNITS } from '../utils/storage';
 
 export default function ShoppingListScreen() {
@@ -14,14 +15,16 @@ export default function ShoppingListScreen() {
   const [purchaseData, setPurchaseData] = useState({ price: '', quantity: '1', unit: 'un', isPromotion: false, originalPrice: '' });
   const [unitModalVisible, setUnitModalVisible] = useState(false);
 
-  useEffect(() => {
-    loadList();
-  }, []);
-
-  const loadList = async () => {
+  const loadList = useCallback(async () => {
     const list = await getShoppingList();
     setShoppingList(list);
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadList();
+    }, [loadList])
+  );
 
   const handleOpenAddItem = () => {
     setNewItem({ name: '', brand: '', category: 'outros' });

@@ -108,7 +108,11 @@ export default function MasterListScreen() {
 
     return (
       <View style={styles.itemCard}>
-        <View style={styles.itemLeft}>
+        <TouchableOpacity
+          accessibilityLabel={`Adicionar ${item.name} à lista de compras`}
+          style={styles.itemLeft}
+          onPress={() => handleAddToShoppingList(item)}
+        >
           <View style={[styles.itemIcon, { backgroundColor: category?.color || '#9E9E9E' }]}>
             <Ionicons name={category?.icon || 'grid'} size={20} color="#fff" />
           </View>
@@ -117,7 +121,7 @@ export default function MasterListScreen() {
             {item.brand ? <Text style={styles.itemBrand}>{item.brand}</Text> : null}
             <Text style={styles.itemCategory}>{category?.name || 'Outros'}</Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.itemActions}>
           <TouchableOpacity
             accessibilityLabel={`Adicionar ${item.name} à lista de compras`}
