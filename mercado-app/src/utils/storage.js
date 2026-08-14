@@ -10,10 +10,16 @@ export const CATEGORIES = [
   { id: 'hortifruti', name: 'Hortifruti', icon: 'leaf', color: '#4CAF50' },
   { id: 'carnes', name: 'Carnes', icon: 'restaurant', color: '#F44336' },
   { id: 'laticinios', name: 'Laticínios', icon: 'cube', color: '#FF9800' },
+  { id: 'frios', name: 'Frios e Embutidos', icon: 'fast-food', color: '#EF5350' },
   { id: 'padaria', name: 'Padaria', icon: 'pizza', color: '#FFC107' },
+  { id: 'mercearia', name: 'Mercearia', icon: 'basket', color: '#8D6E63' },
+  { id: 'congelados', name: 'Congelados', icon: 'snow', color: '#5C6BC0' },
   { id: 'bebidas', name: 'Bebidas', icon: 'wine', color: '#2196F3' },
   { id: 'limpeza', name: 'Limpeza', icon: 'water', color: '#00BCD4' },
   { id: 'higiene', name: 'Higiene', icon: 'body', color: '#E91E63' },
+  { id: 'bebe', name: 'Bebê', icon: 'happy', color: '#F06292' },
+  { id: 'pet', name: 'Pet', icon: 'paw', color: '#AB47BC' },
+  { id: 'casa', name: 'Casa e Utilidades', icon: 'home', color: '#26A69A' },
   { id: 'outros', name: 'Outros', icon: 'grid', color: '#9E9E9E' }
 ];
 
@@ -60,6 +66,20 @@ export const removeFromMasterList = async (id) => {
     return true;
   } catch (error) {
     console.error('Erro ao remover da lista mestra:', error);
+    return false;
+  }
+};
+
+export const updateMasterListItem = async (id, updates) => {
+  try {
+    const current = await getMasterList();
+    const updated = current.map(item =>
+      item.id === id ? { ...item, ...updates } : item
+    );
+    await saveMasterList(updated);
+    return true;
+  } catch (error) {
+    console.error('Erro ao atualizar a lista mestra:', error);
     return false;
   }
 };
