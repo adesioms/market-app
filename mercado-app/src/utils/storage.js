@@ -136,12 +136,13 @@ export const removeFromShoppingList = async (id) => {
 export const markAsPurchased = async (id, purchaseData) => {
   try {
     const current = await getShoppingList();
+    const purchaseDate = new Date().toISOString();
     const updated = current.map(item => {
       if (item.id === id) {
         return {
           ...item,
           status: 'purchased',
-          purchaseDate: new Date().toISOString(),
+          purchaseDate,
           ...purchaseData
         };
       }
@@ -154,7 +155,7 @@ export const markAsPurchased = async (id, purchaseData) => {
     if (purchasedItem) {
       await addToPurchaseHistory({
         ...purchasedItem,
-        purchaseDate: new Date().toISOString(),
+        purchaseDate,
         ...purchaseData
       });
     }
@@ -196,6 +197,18 @@ export const addToPurchaseHistory = async (item) => {
   } catch (error) {
     console.error('Erro ao adicionar ao histórico:', error);
     return null;
+  }
+};
+
+export const removeFromPurchaseHistory = async (id) => {
+  try {
+    const current = await getPurchaseHistory();
+    const updated = current.filter(item => item.id !== id);
+    await savePurchaseHistory(updated);
+    return true;
+  } catch (error) {
+    console.error('Erro ao remover do histórico:', error);
+    return false;
   }
 };
 

@@ -1,72 +1,85 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getHistory, deletePurchase, CATEGORIES } from '../utils/storage';
+import { useFocusEffect } from '@react-navigation/native';
+import { getPurchaseHistory, removeFromPurchaseHistory, CATEGORIES } from '../utils/storage';
 
 export default function HistoryScreen() {
   const [history, setHistory] = useState([]);
   const [filteredHistory, setFilteredHistory] = useState([]);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   
-  // CORREÇÃO: Sintaxe correta do useState com valor inicial
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedCategory, setSelectedCategory] = useState(null);
 
-  useEffect(() => {
-    loadHistory();
+  const loadHistory = useCallback(async () => {
+    const data = await getPurchaseHistory();
+    setHistory(data);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadHistory();
+    }, [loadHistory])
+  );
 
   useEffect(() => {
     filterHistory();
   }, [history, selectedMonth, selectedYear, selectedCategory]);
 
-  const loadHistory = async () => {
-    const data = await getHistory();
-    setHistory(data);
-  };
-
   const filterHistory = () => {
-    let filtered = history.filter(item => {
-      const itemDate = new Date(item.date);
-      // Ajuste de fuso horário simples para comparação correta
-      const localDate = new Date(itemDate.getTime() + itemDate.getTimezoneOffset() * 60000);
-      
-      const matchMonth = localDate.getMonth() === selectedMonth;
-      const matchYear = localDate.getFullYear() === selectedYear;
+    const filtered = history.filter(item => {
+      const purchaseDate = new Date(item.purchaseDate);
+      if (Number.isNaN(purchaseDate.getTime())) return false;
+
+      const matchMonth = purchaseDate.getMonth() === selectedMonth;
+      const matchYear = purchaseDate.getFullYear() === selectedYear;
       const matchCategory = selectedCategory ? item.category === selectedCategory : true;
 
       return matchMonth && matchYear && matchCategory;
     });
 
-    // Ordenar por data (mais recente primeiro)
-    filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Ordenar por data da compra (mais recente primeiro)
+    filtered.sort((a, b) => new Date(b.purchaseDate) - new Date(a.purchaseDate));
     setFilteredHistory(filtered);
   };
 
-  const handleDelete = async (id) => {
-    if (confirm('Tem certeza que deseja excluir este item?')) {
-      await deletePurchase(id);
-      loadHistory();
-    }
+  const handleDelete = (id) => {
+    Alert.alert('Remover compra', 'Tem certeza que deseja excluir este item do histórico?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Remover',
+        style: 'destructive',
+        onPress: async () => {
+          const removed = await removeFromPurchaseHistory(id);
+          if (removed) {
+            loadHistory();
+          } else {
+            Alert.alert('Erro', 'Não foi possível remover esta compra. Tente novamente.');
+          }
+        }
+      }
+    ]);
   };
 
   const getMonths = () => {
-    const months = [];
-    const currentYear = new Date().getFullYear();
-    
-    // Adiciona meses do ano atual e do anterior para filtro
-    for (let i = 0; i < 12; i++) {
-      months.push({ month: i, year: currentYear });
-      if (i === 0) months.push({ month: i, year: currentYear - 1 });
-    }
-    return months;
+    const currentDate = new Date();
+
+    return Array.from({ length: 12 }, (_, index) => {
+      const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - index, 1);
+      return { month: date.getMonth(), year: date.getFullYear() };
+    });
   };
 
   const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
   const getTotalFiltered = () => {
-    return filteredHistory.reduce((sum, item) => sum + parseFloat(item.price), 0);
+    return filteredHistory.reduce((sum, item) => {
+      const price = Number(item.price) || 0;
+      const quantity = Number(item.quantity) || 1;
+      return sum + (price * quantity);
+    }, 0);
   };
 
   const renderCategoryBadge = (category) => {
@@ -119,7 +132,7 @@ export default function HistoryScreen() {
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Data:</Text>
           <Text style={styles.infoValue}>
-            {new Date(item.date).toLocaleDateString('pt-BR')}
+            {new Date(item.purchaseDate).toLocaleDateString('pt-BR')}
           </Text>
         </View>
 
