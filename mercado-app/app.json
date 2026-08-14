@@ -23,7 +23,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f0f1a"
       },
-      "package": "com.mercado.app"
+      "package": "com.mercado.app",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png",
