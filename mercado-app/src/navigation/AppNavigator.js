@@ -1,4 +1,5 @@
 import React from 'react';
+import { Text, TouchableOpacity } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import DashboardScreen from '../screens/DashboardScreen';
@@ -55,7 +56,21 @@ export default function AppNavigator() {
       <Tab.Screen
         name="Comparar"
         component={PriceComparatorScreen}
-        options={{ title: 'Comparar Preços' }}
+        options={({ navigation }) => ({
+          title: 'Comparar preços',
+          tabBarButton: () => null,
+          tabBarStyle: { display: 'none' },
+          headerLeft: () => (
+            <TouchableOpacity
+              accessibilityLabel="Voltar ao início"
+              style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 16, padding: 4 }}
+              onPress={() => navigation.navigate('Início')}
+            >
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 15, marginLeft: 6 }}>Início</Text>
+            </TouchableOpacity>
+          )
+        })}
       />
       <Tab.Screen
         name="Mestra"

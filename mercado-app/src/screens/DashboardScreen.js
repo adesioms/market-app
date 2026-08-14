@@ -7,7 +7,7 @@ import { getDashboardStats, CATEGORIES } from '../utils/storage';
 
 const screenWidth = Dimensions.get('window').width;
 
-export default function DashboardScreen() {
+export default function DashboardScreen({ navigation }) {
   const [stats, setStats] = useState({ totalSpent: 0, categoryData: [], totalItems: 0, promotionCount: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -54,6 +54,21 @@ export default function DashboardScreen() {
           </View>
         </View>
       </View>
+
+      <TouchableOpacity
+        accessibilityLabel="Abrir comparador de preços"
+        style={styles.comparatorShortcut}
+        onPress={() => navigation.navigate('Comparar')}
+      >
+        <View style={styles.comparatorIcon}>
+          <Ionicons name="git-compare-outline" size={23} color="#4CAF50" />
+        </View>
+        <View style={styles.comparatorTextContainer}>
+          <Text style={styles.comparatorTitle}>Comparar preços</Text>
+          <Text style={styles.comparatorSubtitle}>Encontre o melhor custo-benefício antes de comprar</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={22} color="#8888aa" />
+      </TouchableOpacity>
 
       {/* Gráfico por Categoria */}
       {chartData.length > 0 ? (
@@ -149,6 +164,29 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
   },
+  comparatorShortcut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginBottom: 4,
+    padding: 14,
+    backgroundColor: '#1a1a2e',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2d5540',
+  },
+  comparatorIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#183d2a',
+    marginRight: 12,
+  },
+  comparatorTextContainer: { flex: 1 },
+  comparatorTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 3 },
+  comparatorSubtitle: { color: '#8888aa', fontSize: 12, lineHeight: 17 },
   chartCard: {
     margin: 16,
     padding: 16,
