@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { getMasterList, addToMasterList, updateMasterListItem, removeFromMasterList, addToShoppingList, CATEGORIES } from '../utils/storage';
+import { useFocusEffect } from '@react-navigation/native';
+import { getMasterList, getShoppingList, addToMasterList, updateMasterListItem, removeFromMasterList, addToShoppingList, removeFromShoppingList, CATEGORIES } from '../utils/storage';
 
 const EMPTY_ITEM = { name: '', brand: '', category: 'outros' };
 
@@ -10,20 +11,28 @@ export default function MasterListScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [formItem, setFormItem] = useState(EMPTY_ITEM);
   const [editingItemId, setEditingItemId] = useState(null);
+  const [shoppingList, setShoppingList] = useState([]);
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  const [categoryQuery, setCategoryQuery] = useState('');
 
-  useEffect(() => {
-    loadList();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadList();
+    }, [])
+  );
 
   const loadList = async () => {
-    const list = await getMasterList();
+    const [list, shopping] = await Promise.all([getMasterList(), getShoppingList()]);
     setMasterList(list);
+    setShoppingList(shopping);
   };
 
   const closeModal = () => {
     setModalVisible(false);
     setEditingItemId(null);
     setFormItem(EMPTY_ITEM);
+    setCategoryPickerVisible(false);
+    setCategoryQuery('');
   };
 
   const handleOpenAdd = () => {
@@ -88,18 +97,46 @@ export default function MasterListScreen() {
   };
 
   const handleAddToShoppingList = async (item) => {
-    const addedItem = await addToShoppingList({
-      name: item.name,
-      brand: item.brand || '',
-      category: item.category || 'outros'
-    });
+    const existingItem = shoppingList.find(shoppingItem =>
+      shoppingItem.status === 'pending' && (
+        shoppingItem.masterItemId === item.id ||
+        (shoppingItem.name === item.name && (shoppingItem.brand || '') === (item.brand || ''))
+      )
+    );
 
-    if (!addedItem) {
-      Alert.alert('Erro', 'Não foi possível adicionar o produto à lista de compras. Tente novamente.');
+    if (existingItem) {
+      const removed = await removeFromShoppingList(existingItem.id);
+      if (!removed) {
+        Alert.alert('Erro', 'Não foi possível remover o produto da lista de compras.');
+        return;
+      }
+    } else {
+      const addedItem = await addToShoppingList({
+        name: item.name,
+        brand: item.brand || '',
+        category: item.category || 'outros',
+        masterItemId: item.id
+      });
+      if (!addedItem) {
+        Alert.alert('Erro', 'Não foi possível adicionar o produto à lista de compras. Tente novamente.');
+        return;
+      }
     }
+
+    loadList();
   };
 
   const getCategory = (categoryId) => CATEGORIES.find(category => category.id === categoryId);
+  const selectedCategory = getCategory(formItem.category) || CATEGORIES[CATEGORIES.length - 1];
+  const filteredCategories = CATEGORIES.filter(category =>
+    category.name.toLowerCase().includes(categoryQuery.trim().toLowerCase())
+  );
+  const isInShoppingList = (item) => shoppingList.some(shoppingItem =>
+    shoppingItem.status === 'pending' && (
+      shoppingItem.masterItemId === item.id ||
+      (shoppingItem.name === item.name && (shoppingItem.brand || '') === (item.brand || ''))
+    )
+  );
 
   const renderItem = ({ item }) => {
     const category = getCategory(item.category);
@@ -122,11 +159,11 @@ export default function MasterListScreen() {
         </View>
         <View style={styles.itemActions}>
           <TouchableOpacity
-            accessibilityLabel={`Adicionar ${item.name} à lista de compras`}
-            style={styles.addToShoppingButton}
+            accessibilityLabel={isInShoppingList(item) ? `Remover ${item.name} da lista de compras` : `Adicionar ${item.name} à lista de compras`}
+            style={[styles.addToShoppingButton, isInShoppingList(item) && styles.inShoppingButton]}
             onPress={() => handleAddToShoppingList(item)}
           >
-            <Ionicons name="cart-outline" size={20} color="#4CAF50" />
+            <Ionicons name={isInShoppingList(item) ? 'checkmark' : 'cart-outline'} size={20} color={isInShoppingList(item) ? '#fff' : '#4CAF50'} />
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityLabel={`Remover ${item.name}`}
@@ -193,21 +230,11 @@ export default function MasterListScreen() {
               />
 
               <Text style={styles.label}>Categoria</Text>
-              <View style={styles.categorySelector}>
-                {CATEGORIES.map(category => (
-                  <TouchableOpacity
-                    key={category.id}
-                    style={[
-                      styles.categoryChip,
-                      formItem.category === category.id && { backgroundColor: category.color }
-                    ]}
-                    onPress={() => setFormItem({ ...formItem, category: category.id })}
-                  >
-                    <MaterialCommunityIcons name={category.icon} size={16} color="#fff" />
-                    <Text style={styles.categoryChipText}>{category.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <TouchableOpacity style={styles.categoryField} onPress={() => setCategoryPickerVisible(true)}>
+                <MaterialCommunityIcons name={selectedCategory.icon} size={20} color={selectedCategory.color} />
+                <Text style={styles.categoryFieldText}>{selectedCategory.name}</Text>
+                <Ionicons name="search-outline" size={18} color="#aaaac0" />
+              </TouchableOpacity>
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity style={styles.cancelButton} onPress={closeModal}>
@@ -218,6 +245,43 @@ export default function MasterListScreen() {
                 </TouchableOpacity>
               </View>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={categoryPickerVisible} animationType="fade" transparent onRequestClose={() => setCategoryPickerVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.categoryModalContent}>
+            <Text style={styles.modalTitle}>Escolher categoria</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Buscar categoria..."
+              placeholderTextColor="#8888aa"
+              value={categoryQuery}
+              onChangeText={setCategoryQuery}
+              autoFocus
+            />
+            <ScrollView style={styles.categoryResults} keyboardShouldPersistTaps="handled">
+              {filteredCategories.map(category => (
+                <TouchableOpacity
+                  key={category.id}
+                  style={[styles.categoryResult, formItem.category === category.id && { borderColor: category.color, backgroundColor: '#25253b' }]}
+                  onPress={() => {
+                    setFormItem({ ...formItem, category: category.id });
+                    setCategoryPickerVisible(false);
+                    setCategoryQuery('');
+                  }}
+                >
+                  <MaterialCommunityIcons name={category.icon} size={22} color={category.color} />
+                  <Text style={styles.categoryResultText}>{category.name}</Text>
+                  {formItem.category === category.id && <Ionicons name="checkmark-circle" size={21} color="#4CAF50" />}
+                </TouchableOpacity>
+              ))}
+              {filteredCategories.length === 0 && <Text style={styles.noResultsText}>Nenhuma categoria encontrada.</Text>}
+            </ScrollView>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => { setCategoryPickerVisible(false); setCategoryQuery(''); }}>
+              <Text style={styles.cancelButtonText}>Cancelar</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -241,7 +305,8 @@ const styles = StyleSheet.create({
   itemBrand: { color: '#8888aa', fontSize: 14 },
   itemCategory: { color: '#4CAF50', fontSize: 12, marginTop: 4 },
   itemActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addToShoppingButton: { padding: 8 },
+  addToShoppingButton: { padding: 8, borderRadius: 8 },
+  inShoppingButton: { backgroundColor: '#4CAF50' },
   deleteButton: { padding: 8 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: '#fff', fontSize: 18, marginTop: 16 },
@@ -252,9 +317,13 @@ const styles = StyleSheet.create({
   modalTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
   input: { backgroundColor: '#2a2a3e', color: '#fff', padding: 12, borderRadius: 8, marginBottom: 12 },
   label: { color: '#fff', fontSize: 14, marginBottom: 8 },
-  categorySelector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  categoryChip: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#2a2a3e', borderRadius: 20, alignItems: 'center', gap: 6 },
-  categoryChipText: { color: '#fff', fontSize: 14 },
+  categoryField: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a2a3e', padding: 14, borderRadius: 10, marginBottom: 16 },
+  categoryFieldText: { flex: 1, color: '#fff', fontSize: 15, marginLeft: 10 },
+  categoryModalContent: { backgroundColor: '#1a1a2e', borderRadius: 20, padding: 24, margin: 20, maxHeight: '80%' },
+  categoryResults: { marginBottom: 12 },
+  categoryResult: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#3a3a4e', padding: 13, borderRadius: 10, marginBottom: 8 },
+  categoryResultText: { flex: 1, color: '#fff', fontSize: 15, marginLeft: 12 },
+  noResultsText: { color: '#8888aa', textAlign: 'center', padding: 20 },
   modalButtons: { flexDirection: 'row', gap: 12 },
   cancelButton: { flex: 1, backgroundColor: '#2a2a3e', padding: 16, borderRadius: 8, alignItems: 'center' },
   cancelButtonText: { color: '#fff', fontSize: 16 },

@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, searchSuggestions, getPurchaseDefaults, getItemTotal, CATEGORIES, UNITS } from '../utils/storage';
+import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, searchSuggestions, getPurchaseDefaults, getDefaultPriceUnit, getItemTotal, CATEGORIES, UNITS, WEIGHT_VOLUME_UNITS } from '../utils/storage';
 
 const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
 const parseMoneyDigits = (digits) => digits ? Number(digits) / 100 : null;
@@ -15,6 +15,7 @@ const moneyDigitsFromValue = (value) => {
   if (value === null || value === undefined || value === '') return '';
   return String(Math.round(Number(value) * 100));
 };
+const parseQuantity = (value) => Number.parseFloat(String(value || '').replace(',', '.')) || 0;
 
 export default function ShoppingListScreen() {
   const [shoppingList, setShoppingList] = useState([]);
@@ -26,9 +27,13 @@ export default function ShoppingListScreen() {
   const [editingItem, setEditingItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
-  const [purchaseData, setPurchaseData] = useState({ priceDigits: '', quantity: '1', unit: 'un', isPromotion: false, originalPriceDigits: '' });
+  const [purchaseData, setPurchaseData] = useState({ priceDigits: '', quantity: '', unit: 'un', priceMode: 'total', isPromotion: false, originalPriceDigits: '' });
   const [unitModalVisible, setUnitModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  const [categoryPickerMode, setCategoryPickerMode] = useState('filter');
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const [unitPickerTarget, setUnitPickerTarget] = useState('purchase');
 
   const loadList = useCallback(async () => {
     const list = await getShoppingList();
@@ -95,17 +100,68 @@ export default function ShoppingListScreen() {
   };
 
   const handleOpenEditItem = (item) => {
+    const defaults = getPurchaseDefaults(item.category);
+    const unit = item.unit || defaults.unit;
     setEditingItem({
       id: item.id,
       name: item.name || '',
       brand: item.brand || '',
       category: item.category || 'outros',
-      quantity: String(item.quantity ?? getPurchaseDefaults(item.category).quantity),
-      unit: item.unit || getPurchaseDefaults(item.category).unit,
+      quantity: item.quantity === null || item.quantity === undefined ? '' : String(item.quantity),
+      unit,
+      priceMode: item.priceMode || (WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total'),
+      priceUnit: item.priceUnit || getDefaultPriceUnit(unit),
       priceDigits: moneyDigitsFromValue(item.price)
     });
     setEditModalVisible(true);
   };
+
+  const openCategoryPicker = (mode) => {
+    setCategoryPickerMode(mode);
+    setCategoryQuery('');
+    setCategoryPickerVisible(true);
+  };
+
+  const closeCategoryPicker = () => {
+    setCategoryPickerVisible(false);
+    setCategoryQuery('');
+  };
+
+  const openUnitPicker = (target) => {
+    setUnitPickerTarget(target);
+    setUnitModalVisible(true);
+  };
+
+  const chooseUnit = (unit) => {
+    if (unitPickerTarget === 'edit') {
+      const priceMode = WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total';
+      setEditingItem({ ...editingItem, unit, priceMode, priceUnit: getDefaultPriceUnit(unit) });
+    } else {
+      const priceMode = WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total';
+      setPurchaseData({ ...purchaseData, unit, priceMode, priceUnit: getDefaultPriceUnit(unit) });
+    }
+    setUnitModalVisible(false);
+  };
+
+  const chooseCategory = (categoryId) => {
+    if (categoryPickerMode === 'filter') {
+      setSelectedCategory(categoryId === 'todos' ? null : categoryId);
+    } else if (categoryPickerMode === 'new') {
+      setNewItem({ ...newItem, category: categoryId });
+    } else if (categoryPickerMode === 'edit') {
+      setEditingItem({ ...editingItem, category: categoryId });
+    }
+    closeCategoryPicker();
+  };
+
+  const pickerCategory = categoryPickerMode === 'filter'
+    ? selectedCategory
+    : categoryPickerMode === 'new'
+      ? newItem.category
+      : editingItem?.category;
+  const filteredPickerCategories = CATEGORIES.filter(category =>
+    category.name.toLowerCase().includes(categoryQuery.trim().toLowerCase())
+  );
 
   const handleSaveEditedItem = async () => {
     const name = editingItem?.name.trim();
@@ -115,8 +171,9 @@ export default function ShoppingListScreen() {
     }
 
     const quantity = Number.parseFloat(String(editingItem.quantity || '').replace(',', '.'));
-    if (!quantity || quantity <= 0) {
-      Alert.alert('Erro', 'Informe uma quantidade válida');
+    const currentItem = shoppingList.find(item => item.id === editingItem.id);
+    if (currentItem?.status === 'purchased' && (!quantity || quantity <= 0)) {
+      Alert.alert('Erro', 'Uma compra já registrada precisa ter uma quantidade válida');
       return;
     }
 
@@ -124,10 +181,12 @@ export default function ShoppingListScreen() {
       name,
       brand: editingItem.brand.trim(),
       category: editingItem.category,
-      quantity,
+      quantity: quantity > 0 ? quantity : null,
       unit: editingItem.unit,
       price: parseMoneyDigits(editingItem.priceDigits),
-      priceIsTotal: true
+      priceMode: editingItem.priceMode,
+      priceUnit: editingItem.priceUnit || getDefaultPriceUnit(editingItem.unit),
+      priceIsTotal: editingItem.priceMode !== 'unit',
     });
 
     if (!saved) {
@@ -147,10 +206,16 @@ export default function ShoppingListScreen() {
       : (item.unit || defaults.unit);
 
     setSelectedItem(item);
+    const priceMode = item.priceMode || (WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total');
+    const initialQuantity = item.quantity === null || item.quantity === undefined || (WEIGHT_VOLUME_UNITS.includes(unit) && item.quantity === 1 && !item.price && !item.priceMode)
+      ? ''
+      : String(item.quantity);
     setPurchaseData({
       priceDigits: moneyDigitsFromValue(item.price),
-      quantity: String(item.quantity ?? defaults.quantity),
+      quantity: initialQuantity,
       unit,
+      priceMode,
+      priceUnit: item.priceUnit || getDefaultPriceUnit(unit),
       isPromotion: Boolean(item.isPromotion),
       originalPriceDigits: moneyDigitsFromValue(item.originalPrice)
     });
@@ -159,15 +224,22 @@ export default function ShoppingListScreen() {
 
   const handleConfirmPurchase = async () => {
     const quantity = Number.parseFloat(String(purchaseData.quantity || '').replace(',', '.'));
-    if (!quantity || quantity <= 0) {
-      Alert.alert('Erro', 'Digite uma quantidade válida');
+    const price = parseMoneyDigits(purchaseData.priceDigits);
+    if (purchaseData.priceDigits && (!quantity || quantity <= 0)) {
+      Alert.alert('Erro', 'Informe a quantidade para calcular o valor da compra');
+      return;
+    }
+    if (purchaseData.priceMode === 'unit' && purchaseData.priceDigits && (!quantity || quantity <= 0)) {
+      Alert.alert('Erro', `Informe a quantidade em ${purchaseData.unit} para calcular o total`);
       return;
     }
 
     const purchased = await markAsPurchased(selectedItem.id, {
-      price: parseMoneyDigits(purchaseData.priceDigits),
-      priceIsTotal: true,
-      quantity,
+      price,
+      priceMode: purchaseData.priceMode,
+      priceUnit: purchaseData.priceUnit || getDefaultPriceUnit(purchaseData.unit),
+      priceIsTotal: purchaseData.priceMode !== 'unit',
+      quantity: quantity || null,
       unit: purchaseData.unit,
       isPromotion: purchaseData.isPromotion,
       originalPrice: purchaseData.isPromotion ? parseMoneyDigits(purchaseData.originalPriceDigits) : null
@@ -233,10 +305,15 @@ export default function ShoppingListScreen() {
             <Text style={styles.itemCategory}>{category?.name || 'Outros'}</Text>
             <Text style={styles.itemQuantity}>{item.quantity || 1} {item.unit || 'un'}</Text>
             {item.price !== null && item.price !== undefined ? (
-              <Text style={styles.itemPrice}>
-                R$ {total.toFixed(2).replace('.', ',')}
-                {item.isPromotion && <Text style={styles.promotionBadge}> PROMO</Text>}
-              </Text>
+              <>
+                {item.priceMode === 'unit' && (
+                  <Text style={styles.itemReferencePrice}>R$ {Number(item.price).toFixed(2).replace('.', ',')} / {item.priceUnit || item.unit || 'un'}</Text>
+                )}
+                <Text style={styles.itemPrice}>
+                  {item.priceMode === 'unit' ? `Total estimado: R$ ${total.toFixed(2).replace('.', ',')}` : `R$ ${total.toFixed(2).replace('.', ',')}`}
+                  {item.isPromotion && <Text style={styles.promotionBadge}> PROMO</Text>}
+                </Text>
+              </>
             ) : (
               <Text style={styles.itemPendingPrice}>Preço a informar no caixa</Text>
             )}
@@ -282,25 +359,13 @@ export default function ShoppingListScreen() {
 
       <View style={styles.filterSection}>
         <Text style={styles.filterLabel}>Organizar por setor</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScrollContent}>
-          <TouchableOpacity
-            style={[styles.filterChip, !selectedCategory && styles.filterChipActive]}
-            onPress={() => setSelectedCategory(null)}
-          >
-            <Ionicons name="apps-outline" size={16} color={!selectedCategory ? '#fff' : '#aaaac0'} />
-            <Text style={[styles.filterChipText, !selectedCategory && styles.filterChipTextActive]}>Todos</Text>
-          </TouchableOpacity>
-          {CATEGORIES.map(category => (
-            <TouchableOpacity
-              key={category.id}
-              style={[styles.filterChip, selectedCategory === category.id && { backgroundColor: category.color }]}
-              onPress={() => setSelectedCategory(category.id)}
-            >
-              <MaterialCommunityIcons name={category.icon} size={16} color={selectedCategory === category.id ? '#fff' : '#aaaac0'} />
-              <Text style={[styles.filterChipText, selectedCategory === category.id && styles.filterChipTextActive]}>{category.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <TouchableOpacity style={styles.categoryField} onPress={() => openCategoryPicker('filter')}>
+          <Ionicons name="search-outline" size={20} color="#4CAF50" />
+          <Text style={styles.categoryFieldText}>
+            {selectedCategory ? CATEGORIES.find(category => category.id === selectedCategory)?.name : 'Todos os setores'}
+          </Text>
+          <Ionicons name="chevron-down" size={18} color="#aaaac0" />
+        </TouchableOpacity>
       </View>
 
       {/* Lista Pendentes */}
@@ -381,18 +446,11 @@ export default function ShoppingListScreen() {
               onChangeText={(text) => setNewItem({...newItem, brand: text})}
             />
             
-            <View style={styles.categorySelector}>
-              {CATEGORIES.map(cat => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={[styles.categoryChip, newItem.category === cat.id && { backgroundColor: cat.color }]}
-                  onPress={() => setNewItem({...newItem, category: cat.id})}
-                >
-                  <MaterialCommunityIcons name={cat.icon} size={16} color="#fff" />
-                  <Text style={styles.categoryChipText}>{cat.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <TouchableOpacity style={styles.categoryField} onPress={() => openCategoryPicker('new')}>
+              <MaterialCommunityIcons name={CATEGORIES.find(category => category.id === newItem.category)?.icon || 'shape-outline'} size={20} color="#4CAF50" />
+              <Text style={styles.categoryFieldText}>{CATEGORIES.find(category => category.id === newItem.category)?.name || 'Outros'}</Text>
+              <Ionicons name="search-outline" size={18} color="#aaaac0" />
+            </TouchableOpacity>
             
             <View style={styles.modalButtons}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
@@ -455,34 +513,39 @@ export default function ShoppingListScreen() {
                 </View>
               </View>
 
-              <Text style={styles.label}>Unidade</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.unitsScroll}>
-                <View style={styles.unitsContainer}>
-                  {UNITS.map(unit => (
-                    <TouchableOpacity
-                      key={unit}
-                      style={[styles.unitChip, editingItem?.unit === unit && styles.unitChipActive]}
-                      onPress={() => setEditingItem({ ...editingItem, unit })}
-                    >
-                      <Text style={[styles.unitChipText, editingItem?.unit === unit && styles.unitChipTextActive]}>{unit}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+              <Text style={styles.label}>Unidade de compra</Text>
+              <TouchableOpacity style={styles.unitField} onPress={() => openUnitPicker('edit')}>
+                <Ionicons name="options-outline" size={20} color="#4CAF50" />
+                <Text style={styles.unitFieldText}>{editingItem?.unit || 'un'}</Text>
+                <Ionicons name="chevron-down" size={18} color="#aaaac0" />
+              </TouchableOpacity>
+
+              <Text style={styles.label}>Como informar o preço?</Text>
+              <View style={styles.modeSelector}>
+                <TouchableOpacity style={[styles.modeOption, editingItem?.priceMode === 'total' && styles.modeOptionActive]} onPress={() => setEditingItem({ ...editingItem, priceMode: 'total' })}>
+                  <Text style={[styles.modeOptionText, editingItem?.priceMode === 'total' && styles.modeOptionTextActive]}>Valor total</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.modeOption, editingItem?.priceMode === 'unit' && styles.modeOptionActive]} onPress={() => setEditingItem({ ...editingItem, priceMode: 'unit' })}>
+                  <Text style={[styles.modeOptionText, editingItem?.priceMode === 'unit' && styles.modeOptionTextActive]}>Por {editingItem?.priceUnit || editingItem?.unit || 'un'}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.label}>{editingItem?.priceMode === 'unit' ? `Preço por ${editingItem?.priceUnit || editingItem?.unit || 'un'}` : 'Valor total pago'}</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Opcional"
+                placeholderTextColor="#8888aa"
+                keyboardType="decimal-pad"
+                value={formatMoneyDigits(editingItem?.priceDigits)}
+                onChangeText={(value) => setEditingItem({ ...editingItem, priceDigits: onlyDigits(value) })}
+              />
 
               <Text style={styles.label}>Categoria</Text>
-              <View style={styles.categorySelector}>
-                {CATEGORIES.map(cat => (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={[styles.categoryChip, editingItem?.category === cat.id && { backgroundColor: cat.color }]}
-                    onPress={() => setEditingItem({ ...editingItem, category: cat.id })}
-                  >
-                    <MaterialCommunityIcons name={cat.icon} size={16} color="#fff" />
-                    <Text style={styles.categoryChipText}>{cat.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <TouchableOpacity style={styles.categoryField} onPress={() => openCategoryPicker('edit')}>
+                <MaterialCommunityIcons name={CATEGORIES.find(category => category.id === editingItem?.category)?.icon || 'shape-outline'} size={20} color="#4CAF50" />
+                <Text style={styles.categoryFieldText}>{CATEGORIES.find(category => category.id === editingItem?.category)?.name || 'Outros'}</Text>
+                <Ionicons name="search-outline" size={18} color="#aaaac0" />
+              </TouchableOpacity>
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity style={styles.cancelButton} onPress={() => setEditModalVisible(false)}>
@@ -505,27 +568,35 @@ export default function ShoppingListScreen() {
             <Text style={styles.purchaseProductName}>{selectedItem?.name}</Text>
             {selectedItem?.brand ? <Text style={styles.purchaseProductBrand}>{selectedItem.brand}</Text> : null}
             
+            <Text style={styles.label}>{purchaseData.priceMode === 'unit' ? `Preço por ${purchaseData.priceUnit || purchaseData.unit}` : 'Valor total pago'}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Valor total pago (opcional)"
+              placeholder="Opcional"
               placeholderTextColor="#8888aa"
               keyboardType="numeric"
               value={formatMoneyDigits(purchaseData.priceDigits)}
               onChangeText={(value) => setPurchaseData({ ...purchaseData, priceDigits: onlyDigits(value) })}
             />
-            <Text style={styles.helperText}>Opcional no planejamento. Digite só os números: 800 = R$ 8,00; 8 = R$ 0,08.</Text>
+            <Text style={styles.helperText}>{purchaseData.priceMode === 'unit' && purchaseData.unit !== purchaseData.priceUnit ? `Quantidade em ${purchaseData.unit} será convertida para ${purchaseData.priceUnit}. ` : ''}Opcional no planejamento. Digite só os números: 800 = R$ 8,00; 8 = R$ 0,08.</Text>
+            {purchaseData.priceMode === 'unit' && purchaseData.priceDigits && purchaseData.quantity && (
+              <Text style={styles.previewText}>
+                Total estimado: R$ {getItemTotal({ price: parseMoneyDigits(purchaseData.priceDigits), priceMode: 'unit', priceIsTotal: false, quantity: parseQuantity(purchaseData.quantity), unit: purchaseData.unit, priceUnit: purchaseData.priceUnit }).toFixed(2).replace('.', ',')}
+              </Text>
+            )}
             
             <View style={styles.row}>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
                 placeholder={`Quantidade (${purchaseData.unit})`}
                 placeholderTextColor="#8888aa"
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 value={purchaseData.quantity}
-                onChangeText={(text) => setPurchaseData({...purchaseData, quantity: text})}
+                onChangeText={(text) => setPurchaseData({ ...purchaseData, quantity: text })}
               />
-              <TouchableOpacity style={styles.unitButton} onPress={() => setUnitModalVisible(true)}>
+              <TouchableOpacity style={styles.unitFieldCompact} onPress={() => openUnitPicker('purchase')}>
+                <Ionicons name="options-outline" size={18} color="#4CAF50" />
                 <Text style={styles.unitButtonText}>{purchaseData.unit}</Text>
+                <Ionicons name="chevron-down" size={14} color="#aaaac0" />
               </TouchableOpacity>
             </View>
             
@@ -550,10 +621,13 @@ export default function ShoppingListScreen() {
               />
             )}
             
-            {purchaseData.priceDigits && purchaseData.originalPriceDigits && (
+            {purchaseData.priceDigits && purchaseData.originalPriceDigits && purchaseData.quantity && (
               <View style={styles.savingsContainer}>
                 <Text style={styles.savingsText}>
-                  Economia: R$ {((parseMoneyDigits(purchaseData.originalPriceDigits) || 0) - (parseMoneyDigits(purchaseData.priceDigits) || 0)).toFixed(2).replace('.', ',')}
+                  Economia: R$ {(
+                    getItemTotal({ price: parseMoneyDigits(purchaseData.originalPriceDigits), priceMode: purchaseData.priceMode, priceIsTotal: purchaseData.priceMode !== 'unit', quantity: parseQuantity(purchaseData.quantity), unit: purchaseData.unit, priceUnit: purchaseData.priceUnit }) -
+                    getItemTotal({ price: parseMoneyDigits(purchaseData.priceDigits), priceMode: purchaseData.priceMode, priceIsTotal: purchaseData.priceMode !== 'unit', quantity: parseQuantity(purchaseData.quantity), unit: purchaseData.unit, priceUnit: purchaseData.priceUnit })
+                  ).toFixed(2).replace('.', ',')}
                 </Text>
               </View>
             )}
@@ -570,25 +644,74 @@ export default function ShoppingListScreen() {
         </View>
       </Modal>
 
+      {/* Modal Categorias */}
+      <Modal visible={categoryPickerVisible} animationType="fade" transparent onRequestClose={closeCategoryPicker}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.categoryModalContent}>
+            <Text style={styles.modalTitle}>Escolher setor</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Buscar categoria..."
+              placeholderTextColor="#8888aa"
+              value={categoryQuery}
+              onChangeText={setCategoryQuery}
+              autoFocus
+            />
+            {categoryPickerMode === 'filter' && (
+              <TouchableOpacity
+                style={[styles.categoryResult, !selectedCategory && styles.categoryResultSelected]}
+                onPress={() => chooseCategory('todos')}
+              >
+                <Ionicons name="apps-outline" size={22} color="#4CAF50" />
+                <Text style={styles.categoryResultText}>Todos os setores</Text>
+                {!selectedCategory && <Ionicons name="checkmark-circle" size={21} color="#4CAF50" />}
+              </TouchableOpacity>
+            )}
+            <ScrollView style={styles.categoryResults} keyboardShouldPersistTaps="handled">
+              {filteredPickerCategories.map(category => (
+                <TouchableOpacity
+                  key={category.id}
+                  style={[styles.categoryResult, pickerCategory === category.id && styles.categoryResultSelected]}
+                  onPress={() => chooseCategory(category.id)}
+                >
+                  <MaterialCommunityIcons name={category.icon} size={22} color={category.color} />
+                  <Text style={styles.categoryResultText}>{category.name}</Text>
+                  {pickerCategory === category.id && <Ionicons name="checkmark-circle" size={21} color="#4CAF50" />}
+                </TouchableOpacity>
+              ))}
+              {filteredPickerCategories.length === 0 && <Text style={styles.noResultsText}>Nenhuma categoria encontrada.</Text>}
+            </ScrollView>
+            <TouchableOpacity style={styles.cancelButton} onPress={closeCategoryPicker}>
+              <Text style={styles.cancelButtonText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Modal Unidades */}
       <Modal visible={unitModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Selecionar Unidade</Text>
-            {UNITS.map(unit => (
-              <TouchableOpacity
-                key={unit}
-                style={[styles.unitOption, purchaseData.unit === unit && styles.unitOptionSelected]}
-                onPress={() => {
-                  setPurchaseData({...purchaseData, unit});
-                  setUnitModalVisible(false);
-                }}
-              >
-                <Text style={[styles.unitOptionText, purchaseData.unit === unit && styles.unitOptionTextSelected]}>
-                  {unit}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <Text style={styles.modalTitle}>Selecionar unidade</Text>
+            <Text style={styles.modalSubtitle}>Escolhida: {unitPickerTarget === 'edit' ? editingItem?.unit : purchaseData.unit}</Text>
+            <View style={styles.unitOptionsGrid}>
+              {UNITS.map(unit => {
+                const currentUnit = unitPickerTarget === 'edit' ? editingItem?.unit : purchaseData.unit;
+                return (
+                  <TouchableOpacity
+                    key={unit}
+                    style={[styles.unitOption, currentUnit === unit && styles.unitOptionSelected]}
+                    onPress={() => chooseUnit(unit)}
+                  >
+                    <Ionicons name="checkmark-circle" size={18} color={currentUnit === unit ? '#fff' : '#55556a'} />
+                    <Text style={[styles.unitOptionText, currentUnit === unit && styles.unitOptionTextSelected]}>{unit}</Text>
+                    <Text style={[styles.unitOptionDescription, currentUnit === unit && styles.unitOptionTextSelected]}>
+                      {unit === 'kg' ? 'quilo' : unit === 'g' ? 'grama' : unit === 'L' ? 'litro' : unit === 'mL' ? 'mililitro' : unit === 'dz' ? 'dúzia' : unit === 'un' ? 'unidade' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <TouchableOpacity style={styles.cancelButton} onPress={() => setUnitModalVisible(false)}>
               <Text style={styles.cancelButtonText}>Cancelar</Text>
             </TouchableOpacity>
@@ -612,11 +735,14 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
   filterSection: { marginBottom: 12 },
   filterLabel: { color: '#aaaac0', fontSize: 13, fontWeight: '600', marginHorizontal: 16, marginBottom: 8 },
-  filterScrollContent: { paddingHorizontal: 16, paddingBottom: 2 },
-  filterChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a2a3e', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8 },
-  filterChipActive: { backgroundColor: '#4CAF50' },
-  filterChipText: { color: '#aaaac0', fontSize: 12, marginLeft: 5 },
-  filterChipTextActive: { color: '#fff', fontWeight: 'bold' },
+  categoryField: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a2a3e', padding: 14, borderRadius: 10, marginHorizontal: 16, marginBottom: 12 },
+  categoryFieldText: { flex: 1, color: '#fff', fontSize: 15, marginLeft: 10 },
+  categoryModalContent: { backgroundColor: '#1a1a2e', borderRadius: 20, padding: 24, margin: 20, maxHeight: '80%' },
+  categoryResults: { maxHeight: 360, marginBottom: 12 },
+  categoryResult: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#3a3a4e', padding: 13, borderRadius: 10, marginBottom: 8 },
+  categoryResultSelected: { borderColor: '#4CAF50', backgroundColor: '#25253b' },
+  categoryResultText: { flex: 1, color: '#fff', fontSize: 15, marginLeft: 12 },
+  noResultsText: { color: '#8888aa', textAlign: 'center', padding: 20 },
   listScroll: { flex: 1 },
   listContent: { paddingBottom: 24 },
   itemCard: { backgroundColor: '#1a1a2e', padding: 12, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center' },
@@ -628,7 +754,8 @@ const styles = StyleSheet.create({
   itemBrand: { color: '#8888aa', fontSize: 14 },
   itemCategory: { color: '#8888aa', fontSize: 12, marginTop: 2 },
   itemQuantity: { color: '#c0c0d0', fontSize: 12, marginTop: 2 },
-  itemPrice: { color: '#4CAF50', fontSize: 14, fontWeight: 'bold', marginTop: 4 },
+  itemReferencePrice: { color: '#b9c7bd', fontSize: 12, marginTop: 4 },
+  itemPrice: { color: '#4CAF50', fontSize: 14, fontWeight: 'bold', marginTop: 2 },
   itemPendingPrice: { color: '#FFB74D', fontSize: 12, marginTop: 4 },
   itemTextPurchased: { textDecorationLine: 'line-through' },
   promotionBadge: { backgroundColor: '#FF9800', color: '#fff', fontSize: 10, paddingHorizontal: 4, borderRadius: 4, marginLeft: 4 },
@@ -643,16 +770,25 @@ const styles = StyleSheet.create({
   formModalContent: { backgroundColor: '#1a1a2e', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%' },
   modalScrollContent: { padding: 24 },
   modalTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
+  modalSubtitle: { color: '#8888aa', fontSize: 13, textAlign: 'center', marginTop: -8, marginBottom: 16 },
   purchaseProductName: { color: '#4CAF50', fontSize: 18, textAlign: 'center', marginBottom: 4 },
   purchaseProductBrand: { color: '#8888aa', fontSize: 14, textAlign: 'center', marginBottom: 16 },
   input: { backgroundColor: '#2a2a3e', color: '#fff', padding: 12, borderRadius: 8, marginBottom: 12 },
   helperText: { color: '#8888aa', fontSize: 12, lineHeight: 17, marginTop: -6, marginBottom: 12 },
+  previewText: { color: '#4CAF50', fontSize: 14, fontWeight: 'bold', marginTop: -4, marginBottom: 12 },
   row: { flexDirection: 'row', gap: 8 },
   fieldColumn: { marginBottom: 12 },
   halfField: { flex: 1 },
   leftField: { marginRight: 8 },
-  unitButton: { backgroundColor: '#2a2a3e', padding: 12, borderRadius: 8, justifyContent: 'center', minWidth: 80, alignItems: 'center' },
-  unitButtonText: { color: '#fff', fontSize: 16 },
+  unitField: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a2a3e', padding: 14, borderRadius: 10, marginBottom: 14 },
+  unitFieldText: { flex: 1, color: '#fff', fontSize: 16, marginLeft: 10, fontWeight: 'bold' },
+  unitFieldCompact: { flexDirection: 'row', backgroundColor: '#2a2a3e', padding: 12, borderRadius: 8, justifyContent: 'center', minWidth: 96, alignItems: 'center', gap: 5 },
+  unitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  modeSelector: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  modeOption: { flex: 1, padding: 12, borderRadius: 9, borderWidth: 1, borderColor: '#3a3a4e', alignItems: 'center', backgroundColor: '#2a2a3e' },
+  modeOptionActive: { borderColor: '#4CAF50', backgroundColor: '#1d4c30' },
+  modeOptionText: { color: '#aaaac0', fontSize: 14 },
+  modeOptionTextActive: { color: '#fff', fontWeight: 'bold' },
   promotionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   promotionCheckbox: { width: 24, height: 24, borderRadius: 4, borderWidth: 2, borderColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', marginRight: 8 },
   promotionChecked: { backgroundColor: '#4CAF50' },
@@ -672,8 +808,10 @@ const styles = StyleSheet.create({
   categorySelector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   categoryChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#2a2a3e', borderRadius: 20 },
   categoryChipText: { color: '#fff', fontSize: 14 },
-  unitOption: { padding: 16, backgroundColor: '#2a2a3e', borderRadius: 8, marginBottom: 8, alignItems: 'center' },
-  unitOptionSelected: { backgroundColor: '#4CAF50' },
-  unitOptionText: { color: '#fff', fontSize: 16 },
-  unitOptionTextSelected: { fontWeight: 'bold' },
+  unitOptionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  unitOption: { width: '31%', minHeight: 70, padding: 10, backgroundColor: '#2a2a3e', borderRadius: 10, marginBottom: 2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#3a3a4e' },
+  unitOptionSelected: { backgroundColor: '#4CAF50', borderColor: '#8fe6a1' },
+  unitOptionText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginTop: 2 },
+  unitOptionDescription: { color: '#8888aa', fontSize: 10, marginTop: 2 },
+  unitOptionTextSelected: { color: '#fff', fontWeight: 'bold' },
 });

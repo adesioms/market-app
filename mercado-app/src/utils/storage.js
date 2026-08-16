@@ -44,6 +44,13 @@ const normalizeItemCategory = (item) => ({
 });
 
 export const UNITS = ['un', 'dz', 'kg', 'g', 'L', 'mL', 'm', 'cx', 'pacote'];
+export const WEIGHT_VOLUME_UNITS = ['kg', 'g', 'L', 'mL'];
+
+export const getDefaultPriceUnit = (unit) => {
+  if (unit === 'kg' || unit === 'g') return 'kg';
+  if (unit === 'L' || unit === 'mL') return 'L';
+  return unit || 'un';
+};
 
 const CATEGORY_PURCHASE_DEFAULTS = {
   hortifruti: { quantity: '1', unit: 'kg' },
@@ -57,9 +64,21 @@ export const getPurchaseDefaults = (categoryId) => {
 };
 
 export const getItemTotal = (item) => {
-  const price = Number(item?.price) || 0;
-  const quantity = Number(item?.quantity) || 1;
-  return item?.priceIsTotal ? price : price * quantity;
+  const price = Number(item?.price);
+  if (!Number.isFinite(price)) return 0;
+  if (item?.priceMode === 'unit' || item?.priceIsTotal === false) {
+    let quantity = Number(item?.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) return 0;
+
+    const quantityUnit = item?.unit || 'un';
+    const priceUnit = item?.priceUnit || getDefaultPriceUnit(quantityUnit);
+    if (quantityUnit === 'g' && priceUnit === 'kg') quantity /= 1000;
+    if (quantityUnit === 'kg' && priceUnit === 'g') quantity *= 1000;
+    if (quantityUnit === 'mL' && priceUnit === 'L') quantity /= 1000;
+    if (quantityUnit === 'L' && priceUnit === 'mL') quantity *= 1000;
+    return price * quantity;
+  }
+  return price;
 };
 
 // Lista Mestra
@@ -149,6 +168,8 @@ export const addToShoppingList = async (item) => {
     const current = await getShoppingList();
     const category = normalizeCategoryId(item.category);
     const defaults = getPurchaseDefaults(category);
+    const unit = item.unit ?? defaults.unit;
+    const priceMode = item.priceMode ?? (WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total');
     const newItem = {
       ...item,
       category,
@@ -156,9 +177,11 @@ export const addToShoppingList = async (item) => {
       status: 'pending', // pending, purchased
       purchaseDate: null,
       price: null,
-      priceIsTotal: true,
-      quantity: item.quantity ?? defaults.quantity,
-      unit: item.unit ?? defaults.unit,
+      priceMode,
+      priceIsTotal: priceMode !== 'unit',
+      priceUnit: item.priceUnit ?? getDefaultPriceUnit(unit),
+      quantity: item.quantity !== undefined ? item.quantity : (WEIGHT_VOLUME_UNITS.includes(unit) ? null : defaults.quantity),
+      unit,
       isPromotion: false,
       originalPrice: null
     };
@@ -231,7 +254,8 @@ export const markAsPurchased = async (id, purchaseData) => {
           ...item,
           status: 'purchased',
           purchaseDate,
-          priceIsTotal: true,
+          priceMode: purchaseData.priceMode || item.priceMode || 'total',
+          priceIsTotal: purchaseData.priceIsTotal ?? item.priceIsTotal ?? true,
           ...purchaseData
         };
       }

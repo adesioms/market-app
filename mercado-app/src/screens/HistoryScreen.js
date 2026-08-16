@@ -113,11 +113,11 @@ export default function HistoryScreen() {
           </Text>
         </View>
         
-        {item.originalPrice && item.isPromotion && (
+        {item.originalPrice !== null && item.originalPrice !== undefined && item.isPromotion && item.price !== null && item.price !== undefined && (
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>De: R$ {parseFloat(item.originalPrice).toFixed(2)}</Text>
+            <Text style={styles.infoLabel}>De: R$ {getItemTotal({ ...item, price: item.originalPrice }).toFixed(2).replace('.', ',')}</Text>
             <Text style={[styles.infoValue, { color: '#4CAF50' }]}>
-              Economia: R$ {(parseFloat(item.originalPrice) - parseFloat(item.price)).toFixed(2).replace('.', ',')}
+              Economia: R$ {(getItemTotal({ ...item, price: item.originalPrice }) - getItemTotal(item)).toFixed(2).replace('.', ',')}
             </Text>
           </View>
         )}
