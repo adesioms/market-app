@@ -1,0 +1,26 @@
+# Dependências JavaScript
+mercado-app/node_modules/
+
+# Artefatos e estado local do Expo
+mercado-app/.expo/
+mercado-app/web-build/
+
+# Projeto Android gerado pelo Expo e seus artefatos locais
+mercado-app/android/
+
+# Pacotes distribuídos localmente
+mercado-app/dist/
+
+# Arquivos do sistema e editor
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Credenciais e chaves locais de assinatura
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
