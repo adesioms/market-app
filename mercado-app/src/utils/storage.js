@@ -56,6 +56,12 @@ export const getPurchaseDefaults = (categoryId) => {
   return CATEGORY_PURCHASE_DEFAULTS[category] || { quantity: '1', unit: 'un' };
 };
 
+export const getItemTotal = (item) => {
+  const price = Number(item?.price) || 0;
+  const quantity = Number(item?.quantity) || 1;
+  return item?.priceIsTotal ? price : price * quantity;
+};
+
 // Lista Mestra
 export const getMasterList = async () => {
   try {
@@ -150,6 +156,7 @@ export const addToShoppingList = async (item) => {
       status: 'pending', // pending, purchased
       purchaseDate: null,
       price: null,
+      priceIsTotal: true,
       quantity: item.quantity ?? defaults.quantity,
       unit: item.unit ?? defaults.unit,
       isPromotion: false,
@@ -166,13 +173,20 @@ export const addToShoppingList = async (item) => {
 export const updateShoppingItem = async (id, updates) => {
   try {
     const current = await getShoppingList();
+    const existing = current.find(item => item.id === id);
     const updated = current.map(item =>
       item.id === id
         ? { ...item, ...updates, category: normalizeCategoryId(updates.category ?? item.category) }
         : item
     );
-    await saveShoppingList(updated);
-    return true;
+    const saved = await saveShoppingList(updated);
+
+    if (saved && existing?.status === 'purchased') {
+      const updatedItem = updated.find(item => item.id === id);
+      await updatePurchaseHistoryForShoppingItem(id, updatedItem);
+    }
+
+    return saved;
   } catch (error) {
     console.error('Erro ao atualizar item:', error);
     return false;
@@ -191,6 +205,22 @@ export const removeFromShoppingList = async (id) => {
   }
 };
 
+export const updatePurchaseHistoryForShoppingItem = async (shoppingItemId, updates) => {
+  try {
+    const current = await getPurchaseHistory();
+    const updated = current.map(item =>
+      item.shoppingItemId === shoppingItemId
+        ? { ...item, ...updates, category: normalizeCategoryId(updates.category ?? item.category) }
+        : item
+    );
+    await savePurchaseHistory(updated);
+    return true;
+  } catch (error) {
+    console.error('Erro ao atualizar compra no histórico:', error);
+    return false;
+  }
+};
+
 export const markAsPurchased = async (id, purchaseData) => {
   try {
     const current = await getShoppingList();
@@ -201,6 +231,7 @@ export const markAsPurchased = async (id, purchaseData) => {
           ...item,
           status: 'purchased',
           purchaseDate,
+          priceIsTotal: true,
           ...purchaseData
         };
       }
@@ -213,7 +244,9 @@ export const markAsPurchased = async (id, purchaseData) => {
     if (purchasedItem) {
       await addToPurchaseHistory({
         ...purchasedItem,
+        shoppingItemId: id,
         purchaseDate,
+        priceIsTotal: true,
         ...purchaseData
       });
     }
@@ -336,7 +369,7 @@ export const getDashboardStats = async () => {
     });
     
     const totalSpent = monthPurchases.reduce((sum, item) => {
-      return sum + (item.price * item.quantity || 0);
+      return sum + getItemTotal(item);
     }, 0);
     
     const categoryTotals = {};
@@ -346,7 +379,7 @@ export const getDashboardStats = async () => {
     
     monthPurchases.forEach(item => {
       if (categoryTotals[item.category] !== undefined) {
-        categoryTotals[item.category] += (item.price * item.quantity || 0);
+        categoryTotals[item.category] += getItemTotal(item);
       }
     });
     

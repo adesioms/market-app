@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { getPurchaseHistory, removeFromPurchaseHistory, CATEGORIES } from '../utils/storage';
+import { getPurchaseHistory, removeFromPurchaseHistory, getItemTotal, CATEGORIES } from '../utils/storage';
 
 export default function HistoryScreen() {
   const [history, setHistory] = useState([]);
@@ -74,13 +74,7 @@ export default function HistoryScreen() {
 
   const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-  const getTotalFiltered = () => {
-    return filteredHistory.reduce((sum, item) => {
-      const price = Number(item.price) || 0;
-      const quantity = Number(item.quantity) || 1;
-      return sum + (price * quantity);
-    }, 0);
-  };
+  const getTotalFiltered = () => filteredHistory.reduce((sum, item) => sum + getItemTotal(item), 0);
 
   const renderCategoryBadge = (category) => {
     const catConfig = CATEGORIES.find(c => c.id === category) || CATEGORIES[0];
@@ -111,15 +105,19 @@ export default function HistoryScreen() {
 
       <View style={styles.cardBody}>
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Preço:</Text>
-          <Text style={styles.infoValue}>R$ {parseFloat(item.price).toFixed(2)}</Text>
+          <Text style={styles.infoLabel}>Valor total:</Text>
+          <Text style={styles.infoValue}>
+            {item.price !== null && item.price !== undefined
+              ? `R$ ${getItemTotal(item).toFixed(2).replace('.', ',')}`
+              : 'A informar'}
+          </Text>
         </View>
         
         {item.originalPrice && item.isPromotion && (
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>De: R$ {parseFloat(item.originalPrice).toFixed(2)}</Text>
             <Text style={[styles.infoValue, { color: '#4CAF50' }]}>
-              Economia: R$ {(parseFloat(item.originalPrice) - parseFloat(item.price)).toFixed(2)}
+              Economia: R$ {(parseFloat(item.originalPrice) - parseFloat(item.price)).toFixed(2).replace('.', ',')}
             </Text>
           </View>
         )}

@@ -2,7 +2,19 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, searchSuggestions, getPurchaseDefaults, CATEGORIES, UNITS } from '../utils/storage';
+import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, searchSuggestions, getPurchaseDefaults, getItemTotal, CATEGORIES, UNITS } from '../utils/storage';
+
+const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
+const parseMoneyDigits = (digits) => digits ? Number(digits) / 100 : null;
+const formatMoneyDigits = (digits) => {
+  if (!digits) return '';
+  const amount = Number(digits) / 100;
+  return amount.toFixed(2).replace('.', ',');
+};
+const moneyDigitsFromValue = (value) => {
+  if (value === null || value === undefined || value === '') return '';
+  return String(Math.round(Number(value) * 100));
+};
 
 export default function ShoppingListScreen() {
   const [shoppingList, setShoppingList] = useState([]);
@@ -14,8 +26,9 @@ export default function ShoppingListScreen() {
   const [editingItem, setEditingItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
-  const [purchaseData, setPurchaseData] = useState({ price: '', quantity: '1', unit: 'un', isPromotion: false, originalPrice: '' });
+  const [purchaseData, setPurchaseData] = useState({ priceDigits: '', quantity: '1', unit: 'un', isPromotion: false, originalPriceDigits: '' });
   const [unitModalVisible, setUnitModalVisible] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState(null);
 
   const loadList = useCallback(async () => {
     const list = await getShoppingList();
@@ -86,7 +99,10 @@ export default function ShoppingListScreen() {
       id: item.id,
       name: item.name || '',
       brand: item.brand || '',
-      category: item.category || 'outros'
+      category: item.category || 'outros',
+      quantity: String(item.quantity ?? getPurchaseDefaults(item.category).quantity),
+      unit: item.unit || getPurchaseDefaults(item.category).unit,
+      priceDigits: moneyDigitsFromValue(item.price)
     });
     setEditModalVisible(true);
   };
@@ -98,10 +114,20 @@ export default function ShoppingListScreen() {
       return;
     }
 
+    const quantity = Number.parseFloat(String(editingItem.quantity || '').replace(',', '.'));
+    if (!quantity || quantity <= 0) {
+      Alert.alert('Erro', 'Informe uma quantidade válida');
+      return;
+    }
+
     const saved = await updateShoppingItem(editingItem.id, {
       name,
       brand: editingItem.brand.trim(),
-      category: editingItem.category
+      category: editingItem.category,
+      quantity,
+      unit: editingItem.unit,
+      price: parseMoneyDigits(editingItem.priceDigits),
+      priceIsTotal: true
     });
 
     if (!saved) {
@@ -122,27 +148,29 @@ export default function ShoppingListScreen() {
 
     setSelectedItem(item);
     setPurchaseData({
-      price: '',
+      priceDigits: moneyDigitsFromValue(item.price),
       quantity: String(item.quantity ?? defaults.quantity),
       unit,
-      isPromotion: false,
-      originalPrice: ''
+      isPromotion: Boolean(item.isPromotion),
+      originalPriceDigits: moneyDigitsFromValue(item.originalPrice)
     });
     setPurchaseModalVisible(true);
   };
 
   const handleConfirmPurchase = async () => {
-    if (!purchaseData.price || parseFloat(purchaseData.price) <= 0) {
-      Alert.alert('Erro', 'Digite um preço válido');
+    const quantity = Number.parseFloat(String(purchaseData.quantity || '').replace(',', '.'));
+    if (!quantity || quantity <= 0) {
+      Alert.alert('Erro', 'Digite uma quantidade válida');
       return;
     }
-    
+
     const purchased = await markAsPurchased(selectedItem.id, {
-      price: parseFloat(purchaseData.price),
-      quantity: parseFloat(purchaseData.quantity) || 1,
+      price: parseMoneyDigits(purchaseData.priceDigits),
+      priceIsTotal: true,
+      quantity,
       unit: purchaseData.unit,
       isPromotion: purchaseData.isPromotion,
-      originalPrice: purchaseData.isPromotion ? parseFloat(purchaseData.originalPrice) : null
+      originalPrice: purchaseData.isPromotion ? parseMoneyDigits(purchaseData.originalPriceDigits) : null
     });
 
     if (!purchased) {
@@ -165,21 +193,23 @@ export default function ShoppingListScreen() {
     ]);
   };
 
-  const calculateTotal = () => {
-    let total = 0;
-    shoppingList.forEach(item => {
-      if (item.status === 'purchased' && item.price && item.quantity) {
-        total += item.price * item.quantity;
-      }
-    });
-    return total;
-  };
+  const calculateTotal = () => shoppingList
+    .filter(item => item.status === 'purchased')
+    .reduce((total, item) => total + getItemTotal(item), 0);
 
-  const pendingItems = shoppingList.filter(item => item.status === 'pending');
-  const purchasedItems = shoppingList.filter(item => item.status === 'purchased');
+  const categoryOrder = CATEGORIES.reduce((order, category, index) => ({ ...order, [category.id]: index }), {});
+  const filteredItems = [...(selectedCategory
+    ? shoppingList.filter(item => item.category === selectedCategory)
+    : shoppingList)].sort((first, second) => {
+      const categoryDifference = (categoryOrder[first.category] ?? 999) - (categoryOrder[second.category] ?? 999);
+      return categoryDifference || String(first.name || '').localeCompare(String(second.name || ''), 'pt-BR');
+    });
+  const pendingItems = filteredItems.filter(item => item.status === 'pending');
+  const purchasedItems = filteredItems.filter(item => item.status === 'purchased');
 
   const renderItem = ({ item }) => {
     const category = CATEGORIES.find(c => c.id === item.category);
+    const total = getItemTotal(item);
 
     return (
       <View style={[styles.itemCard, item.status === 'purchased' && styles.itemPurchased]}>
@@ -201,11 +231,14 @@ export default function ShoppingListScreen() {
               </Text>
             ) : null}
             <Text style={styles.itemCategory}>{category?.name || 'Outros'}</Text>
-            {item.status === 'purchased' && item.price && (
+            <Text style={styles.itemQuantity}>{item.quantity || 1} {item.unit || 'un'}</Text>
+            {item.price !== null && item.price !== undefined ? (
               <Text style={styles.itemPrice}>
-                R$ {(item.price * item.quantity).toFixed(2)}
+                R$ {total.toFixed(2).replace('.', ',')}
                 {item.isPromotion && <Text style={styles.promotionBadge}> PROMO</Text>}
               </Text>
+            ) : (
+              <Text style={styles.itemPendingPrice}>Preço a informar no caixa</Text>
             )}
           </View>
         </TouchableOpacity>
@@ -231,12 +264,13 @@ export default function ShoppingListScreen() {
 
   return (
     <View style={styles.container}>
+      <ScrollView style={styles.listScroll} contentContainerStyle={styles.listContent} nestedScrollEnabled>
       {/* Header com Total */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Lista de Compras</Text>
         <View style={styles.totalContainer}>
-          <Text style={styles.totalLabel}>Total:</Text>
-          <Text style={styles.totalValue}>R$ {calculateTotal().toFixed(2)}</Text>
+          <Text style={styles.totalLabel}>Total informado:</Text>
+          <Text style={styles.totalValue}>R$ {calculateTotal().toFixed(2).replace('.', ',')}</Text>
         </View>
       </View>
 
@@ -245,6 +279,29 @@ export default function ShoppingListScreen() {
         <Ionicons name="add" size={24} color="#fff" />
         <Text style={styles.addButtonText}>Adicionar Item</Text>
       </TouchableOpacity>
+
+      <View style={styles.filterSection}>
+        <Text style={styles.filterLabel}>Organizar por setor</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScrollContent}>
+          <TouchableOpacity
+            style={[styles.filterChip, !selectedCategory && styles.filterChipActive]}
+            onPress={() => setSelectedCategory(null)}
+          >
+            <Ionicons name="apps-outline" size={16} color={!selectedCategory ? '#fff' : '#aaaac0'} />
+            <Text style={[styles.filterChipText, !selectedCategory && styles.filterChipTextActive]}>Todos</Text>
+          </TouchableOpacity>
+          {CATEGORIES.map(category => (
+            <TouchableOpacity
+              key={category.id}
+              style={[styles.filterChip, selectedCategory === category.id && { backgroundColor: category.color }]}
+              onPress={() => setSelectedCategory(category.id)}
+            >
+              <MaterialCommunityIcons name={category.icon} size={16} color={selectedCategory === category.id ? '#fff' : '#aaaac0'} />
+              <Text style={[styles.filterChipText, selectedCategory === category.id && styles.filterChipTextActive]}>{category.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {/* Lista Pendentes */}
       {pendingItems.length > 0 && (
@@ -279,6 +336,16 @@ export default function ShoppingListScreen() {
           <Text style={styles.emptySubtext}>Adicione itens para começar</Text>
         </View>
       )}
+
+      {shoppingList.length > 0 && filteredItems.length === 0 && (
+        <View style={styles.filteredEmptyContainer}>
+          <Ionicons name="filter-outline" size={40} color="#8888aa" />
+          <Text style={styles.emptyText}>Nenhum item neste setor</Text>
+          <Text style={styles.emptySubtext}>Escolha outro setor para ver os produtos.</Text>
+        </View>
+      )}
+
+      </ScrollView>
 
       {/* Modal Adicionar Item */}
       <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
@@ -363,6 +430,46 @@ export default function ShoppingListScreen() {
                 onChangeText={(brand) => setEditingItem({ ...editingItem, brand })}
               />
 
+              <View style={styles.row}>
+                <View style={[styles.fieldColumn, styles.halfField, styles.leftField]}>
+                  <Text style={styles.label}>Quantidade</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="1"
+                    placeholderTextColor="#8888aa"
+                    keyboardType="decimal-pad"
+                    value={editingItem?.quantity || ''}
+                    onChangeText={(quantity) => setEditingItem({ ...editingItem, quantity })}
+                  />
+                </View>
+                <View style={[styles.fieldColumn, styles.halfField]}>
+                  <Text style={styles.label}>Valor total (R$)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Opcional"
+                    placeholderTextColor="#8888aa"
+                    keyboardType="decimal-pad"
+                    value={formatMoneyDigits(editingItem?.priceDigits)}
+                    onChangeText={(value) => setEditingItem({ ...editingItem, priceDigits: onlyDigits(value) })}
+                  />
+                </View>
+              </View>
+
+              <Text style={styles.label}>Unidade</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.unitsScroll}>
+                <View style={styles.unitsContainer}>
+                  {UNITS.map(unit => (
+                    <TouchableOpacity
+                      key={unit}
+                      style={[styles.unitChip, editingItem?.unit === unit && styles.unitChipActive]}
+                      onPress={() => setEditingItem({ ...editingItem, unit })}
+                    >
+                      <Text style={[styles.unitChipText, editingItem?.unit === unit && styles.unitChipTextActive]}>{unit}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+
               <Text style={styles.label}>Categoria</Text>
               <View style={styles.categorySelector}>
                 {CATEGORIES.map(cat => (
@@ -400,12 +507,13 @@ export default function ShoppingListScreen() {
             
             <TextInput
               style={styles.input}
-              placeholder={`Preço por ${purchaseData.unit} (R$)`}
+              placeholder="Valor total pago (opcional)"
               placeholderTextColor="#8888aa"
               keyboardType="numeric"
-              value={purchaseData.price}
-              onChangeText={(text) => setPurchaseData({...purchaseData, price: text})}
+              value={formatMoneyDigits(purchaseData.priceDigits)}
+              onChangeText={(value) => setPurchaseData({ ...purchaseData, priceDigits: onlyDigits(value) })}
             />
+            <Text style={styles.helperText}>Opcional no planejamento. Digite só os números: 800 = R$ 8,00; 8 = R$ 0,08.</Text>
             
             <View style={styles.row}>
               <TextInput
@@ -434,18 +542,18 @@ export default function ShoppingListScreen() {
             {purchaseData.isPromotion && (
               <TextInput
                 style={styles.input}
-                placeholder="Preço Original (R$)"
+                placeholder="Valor original total (opcional)"
                 placeholderTextColor="#8888aa"
                 keyboardType="numeric"
-                value={purchaseData.originalPrice}
-                onChangeText={(text) => setPurchaseData({...purchaseData, originalPrice: text})}
+                value={formatMoneyDigits(purchaseData.originalPriceDigits)}
+                onChangeText={(value) => setPurchaseData({ ...purchaseData, originalPriceDigits: onlyDigits(value) })}
               />
             )}
             
-            {purchaseData.price && purchaseData.quantity && purchaseData.originalPrice && (
+            {purchaseData.priceDigits && purchaseData.originalPriceDigits && (
               <View style={styles.savingsContainer}>
                 <Text style={styles.savingsText}>
-                  Economia: R$ {((parseFloat(purchaseData.originalPrice) - parseFloat(purchaseData.price)) * parseFloat(purchaseData.quantity)).toFixed(2)}
+                  Economia: R$ {((parseMoneyDigits(purchaseData.originalPriceDigits) || 0) - (parseMoneyDigits(purchaseData.priceDigits) || 0)).toFixed(2).replace('.', ',')}
                 </Text>
               </View>
             )}
@@ -502,6 +610,15 @@ const styles = StyleSheet.create({
   addButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
   section: { paddingHorizontal: 16, marginBottom: 16 },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
+  filterSection: { marginBottom: 12 },
+  filterLabel: { color: '#aaaac0', fontSize: 13, fontWeight: '600', marginHorizontal: 16, marginBottom: 8 },
+  filterScrollContent: { paddingHorizontal: 16, paddingBottom: 2 },
+  filterChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a2a3e', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8 },
+  filterChipActive: { backgroundColor: '#4CAF50' },
+  filterChipText: { color: '#aaaac0', fontSize: 12, marginLeft: 5 },
+  filterChipTextActive: { color: '#fff', fontWeight: 'bold' },
+  listScroll: { flex: 1 },
+  listContent: { paddingBottom: 24 },
   itemCard: { backgroundColor: '#1a1a2e', padding: 12, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center' },
   itemPurchased: { opacity: 0.7 },
   itemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
@@ -510,14 +627,17 @@ const styles = StyleSheet.create({
   itemName: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   itemBrand: { color: '#8888aa', fontSize: 14 },
   itemCategory: { color: '#8888aa', fontSize: 12, marginTop: 2 },
+  itemQuantity: { color: '#c0c0d0', fontSize: 12, marginTop: 2 },
   itemPrice: { color: '#4CAF50', fontSize: 14, fontWeight: 'bold', marginTop: 4 },
+  itemPendingPrice: { color: '#FFB74D', fontSize: 12, marginTop: 4 },
   itemTextPurchased: { textDecorationLine: 'line-through' },
   promotionBadge: { backgroundColor: '#FF9800', color: '#fff', fontSize: 10, paddingHorizontal: 4, borderRadius: 4, marginLeft: 4 },
   itemActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   buyButton: { backgroundColor: '#4CAF50', padding: 8, borderRadius: 8 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: '#fff', fontSize: 18, marginTop: 16 },
-  emptySubtext: { color: '#8888aa', fontSize: 14, marginTop: 8 },
+  emptySubtext: { color: '#8888aa', fontSize: 14, marginTop: 8, textAlign: 'center' },
+  filteredEmptyContainer: { padding: 32, justifyContent: 'center', alignItems: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#1a1a2e', padding: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   formModalContent: { backgroundColor: '#1a1a2e', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%' },
@@ -526,7 +646,11 @@ const styles = StyleSheet.create({
   purchaseProductName: { color: '#4CAF50', fontSize: 18, textAlign: 'center', marginBottom: 4 },
   purchaseProductBrand: { color: '#8888aa', fontSize: 14, textAlign: 'center', marginBottom: 16 },
   input: { backgroundColor: '#2a2a3e', color: '#fff', padding: 12, borderRadius: 8, marginBottom: 12 },
+  helperText: { color: '#8888aa', fontSize: 12, lineHeight: 17, marginTop: -6, marginBottom: 12 },
   row: { flexDirection: 'row', gap: 8 },
+  fieldColumn: { marginBottom: 12 },
+  halfField: { flex: 1 },
+  leftField: { marginRight: 8 },
   unitButton: { backgroundColor: '#2a2a3e', padding: 12, borderRadius: 8, justifyContent: 'center', minWidth: 80, alignItems: 'center' },
   unitButtonText: { color: '#fff', fontSize: 16 },
   promotionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
