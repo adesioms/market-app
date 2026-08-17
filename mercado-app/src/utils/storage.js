@@ -4,7 +4,8 @@ const STORAGE_KEYS = {
   SHOPPING_LIST: '@mercado:shoppingList',
   MASTER_LIST: '@mercado:masterList',
   PRODUCT_CATALOG: '@mercado:productCatalog',
-  PURCHASE_HISTORY: '@mercado:purchaseHistory'
+  PURCHASE_HISTORY: '@mercado:purchaseHistory',
+  ACTIVE_PURCHASE_VISIT: '@mercado:activePurchaseVisit'
 };
 
 export const CATEGORIES = [
@@ -60,6 +61,32 @@ export const getDefaultPriceUnit = (unit) => {
   if (unit === 'kg' || unit === 'g') return 'kg';
   if (unit === 'L' || unit === 'mL') return 'L';
   return unit || 'un';
+};
+
+const normalizeMarketName = (value) => String(value || '').trim().toLowerCase();
+
+const getActivePurchaseVisit = async () => {
+  try {
+    const data = await AsyncStorage.getItem(STORAGE_KEYS.ACTIVE_PURCHASE_VISIT);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    console.error('Erro ao buscar visita ativa:', error);
+    return null;
+  }
+};
+
+const saveActivePurchaseVisit = async (visit) => {
+  try {
+    if (!visit) {
+      await AsyncStorage.removeItem(STORAGE_KEYS.ACTIVE_PURCHASE_VISIT);
+    } else {
+      await AsyncStorage.setItem(STORAGE_KEYS.ACTIVE_PURCHASE_VISIT, JSON.stringify(visit));
+    }
+    return true;
+  } catch (error) {
+    console.error('Erro ao salvar visita ativa:', error);
+    return false;
+  }
 };
 
 const CATEGORY_PURCHASE_DEFAULTS = {
@@ -365,6 +392,7 @@ export const startNewShoppingRound = async () => {
   try {
     // A rodada ativa é temporária. O catálogo permanente e o histórico ficam intactos.
     await saveShoppingList([]);
+    await saveActivePurchaseVisit(null);
     return true;
   } catch (error) {
     console.error('Erro ao iniciar nova rodada:', error);
@@ -442,8 +470,14 @@ export const updatePurchaseHistoryForShoppingItem = async (shoppingItemId, updat
 export const markAsPurchased = async (id, purchaseData) => {
   try {
     const current = await getShoppingList();
+    const currentItem = current.find(item => item.id === id);
     const purchaseDate = new Date().toISOString();
     const purchaseId = `${id}-${Date.now()}`;
+    const activeVisit = await getActivePurchaseVisit();
+    const requestedMarketName = purchaseData.marketName || currentItem?.marketName || activeVisit?.marketName || null;
+    const sameVisit = activeVisit && (!requestedMarketName || !activeVisit.marketName || normalizeMarketName(activeVisit.marketName) === normalizeMarketName(requestedMarketName));
+    const purchaseVisitId = sameVisit ? activeVisit.visitId : `visit-${Date.now()}`;
+    await saveActivePurchaseVisit({ visitId: purchaseVisitId, marketName: requestedMarketName });
     const updated = current.map(item => {
       if (item.id === id) {
         return {
@@ -453,7 +487,9 @@ export const markAsPurchased = async (id, purchaseData) => {
           purchaseId,
           priceMode: purchaseData.priceMode || item.priceMode || 'total',
           priceIsTotal: purchaseData.priceIsTotal ?? item.priceIsTotal ?? true,
-          ...purchaseData
+          ...purchaseData,
+          marketName: requestedMarketName,
+          purchaseVisitId
         };
       }
       return item;
@@ -469,7 +505,9 @@ export const markAsPurchased = async (id, purchaseData) => {
         purchaseId,
         purchaseDate,
         priceIsTotal: true,
-        ...purchaseData
+        ...purchaseData,
+        marketName: requestedMarketName,
+        purchaseVisitId
       });
     }
     
@@ -550,11 +588,13 @@ export const updatePurchaseHistoryItems = async (ids, updates) => {
     const saved = await savePurchaseHistory(updated);
     if (!saved) return false;
 
-    if (updates.purchaseDate) {
+    if (updates.purchaseDate || updates.marketName !== undefined || updates.purchaseVisitId) {
       const shoppingList = await getShoppingList();
       await saveShoppingList(shoppingList.map(item => {
         const historyMatch = current.find(historyItem => idSet.has(historyItem.id) && historyItem.shoppingItemId === item.id && historyItem.purchaseId === item.purchaseId);
-        return historyMatch ? { ...item, purchaseDate: updates.purchaseDate } : item;
+        return historyMatch
+          ? { ...item, ...(updates.purchaseDate ? { purchaseDate: updates.purchaseDate } : {}), ...(updates.marketName !== undefined ? { marketName: updates.marketName } : {}), ...(updates.purchaseVisitId ? { purchaseVisitId: updates.purchaseVisitId } : {}) }
+          : item;
       }));
     }
     return true;
