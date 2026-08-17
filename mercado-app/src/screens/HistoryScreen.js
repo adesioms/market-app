@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert, TextInput } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { getPurchaseHistory, removeFromPurchaseHistory, getItemTotal, CATEGORIES } from '../utils/storage';
+import { getPurchaseHistory, removeFromPurchaseHistory, updatePurchaseHistoryItem, getItemTotal, CATEGORIES } from '../utils/storage';
 
 export default function HistoryScreen() {
   const [history, setHistory] = useState([]);
   const [filteredHistory, setFilteredHistory] = useState([]);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
   
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -43,6 +45,44 @@ export default function HistoryScreen() {
     // Ordenar por data da compra (mais recente primeiro)
     filtered.sort((a, b) => new Date(b.purchaseDate) - new Date(a.purchaseDate));
     setFilteredHistory(filtered);
+  };
+
+  const handleOpenEdit = (item) => {
+    const date = new Date(item.purchaseDate);
+    const dateText = Number.isNaN(date.getTime())
+      ? ''
+      : date.toLocaleDateString('pt-BR');
+    setEditingItem({ id: item.id, purchaseDate: dateText });
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    const value = editingItem?.purchaseDate?.trim();
+    const match = value?.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    if (!match) {
+      Alert.alert('Data inválida', 'Use o formato DD/MM/AAAA.');
+      return;
+    }
+
+    const [, day, month, year] = match;
+    const parsedDate = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0);
+    if (parsedDate.getFullYear() !== Number(year) || parsedDate.getMonth() !== Number(month) - 1 || parsedDate.getDate() !== Number(day)) {
+      Alert.alert('Data inválida', 'Informe uma data real.');
+      return;
+    }
+
+    const purchaseDate = parsedDate.toISOString();
+    const saved = await updatePurchaseHistoryItem(editingItem.id, { purchaseDate });
+    if (!saved) {
+      Alert.alert('Erro', 'Não foi possível atualizar a data da compra.');
+      return;
+    }
+
+    setSelectedMonth(parsedDate.getMonth());
+    setSelectedYear(parsedDate.getFullYear());
+    setEditModalVisible(false);
+    setEditingItem(null);
+    loadHistory();
   };
 
   const handleDelete = (id) => {
@@ -98,9 +138,14 @@ export default function HistoryScreen() {
             </View>
           )}
         </View>
-        <TouchableOpacity onPress={() => handleDelete(item.id)}>
-          <Ionicons name="trash-outline" size={20} color="#ff4444" />
-        </TouchableOpacity>
+        <View style={styles.cardActions}>
+          <TouchableOpacity accessibilityLabel={`Editar data de ${item.name}`} onPress={() => handleOpenEdit(item)}>
+            <Ionicons name="create-outline" size={20} color="#4CAF50" />
+          </TouchableOpacity>
+          <TouchableOpacity accessibilityLabel={`Remover ${item.name} do histórico`} onPress={() => handleDelete(item.id)}>
+            <Ionicons name="trash-outline" size={20} color="#ff4444" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.cardBody}>
@@ -178,6 +223,38 @@ export default function HistoryScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      {/* Modal para editar a data da compra */}
+      <Modal
+        visible={editModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.editModalContent}>
+            <Text style={styles.modalTitle}>Editar data da compra</Text>
+            <Text style={styles.editHelper}>Use a data do ticket ou do dia em que a compra realmente aconteceu.</Text>
+            <TextInput
+              style={styles.dateInput}
+              placeholder="DD/MM/AAAA"
+              placeholderTextColor="#8888aa"
+              keyboardType="numbers-and-punctuation"
+              value={editingItem?.purchaseDate || ''}
+              onChangeText={(purchaseDate) => setEditingItem({ ...editingItem, purchaseDate })}
+              autoFocus
+            />
+            <View style={styles.editButtons}>
+              <TouchableOpacity style={styles.cancelEditButton} onPress={() => setEditModalVisible(false)}>
+                <Text style={styles.cancelEditText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveEditButton} onPress={handleSaveEdit}>
+                <Text style={styles.saveEditText}>Salvar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal de Filtro */}
       <Modal
@@ -299,6 +376,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2a2a4e',
   },
+  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -347,6 +425,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'flex-end',
   },
+  editModalContent: { backgroundColor: '#1a1a2e', borderRadius: 20, padding: 20, margin: 20 },
+  editHelper: { color: '#aaaac0', fontSize: 13, lineHeight: 18, marginBottom: 14 },
+  dateInput: { backgroundColor: '#2a2a4e', color: '#fff', padding: 14, borderRadius: 10, fontSize: 18, marginBottom: 14 },
+  editButtons: { flexDirection: 'row', gap: 10 },
+  cancelEditButton: { flex: 1, backgroundColor: '#2a2a4e', padding: 14, borderRadius: 10, alignItems: 'center' },
+  cancelEditText: { color: '#fff', fontWeight: '600' },
+  saveEditButton: { flex: 1, backgroundColor: '#4CAF50', padding: 14, borderRadius: 10, alignItems: 'center' },
+  saveEditText: { color: '#fff', fontWeight: 'bold' },
   modalContent: {
     backgroundColor: '#1a1a2e',
     borderTopLeftRadius: 20,

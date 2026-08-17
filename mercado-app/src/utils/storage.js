@@ -440,6 +440,31 @@ export const addToPurchaseHistory = async (item) => {
   }
 };
 
+export const updatePurchaseHistoryItem = async (id, updates) => {
+  try {
+    const current = await getPurchaseHistory();
+    const existing = current.find(item => item.id === id);
+    const updated = current.map(item => item.id === id
+      ? { ...item, ...updates, category: normalizeCategoryId(updates.category ?? item.category) }
+      : item
+    );
+    const saved = await savePurchaseHistory(updated);
+    if (!saved) return false;
+
+    if (existing?.shoppingItemId && updates.purchaseDate) {
+      const shoppingList = await getShoppingList();
+      await saveShoppingList(shoppingList.map(item => item.id === existing.shoppingItemId
+        ? { ...item, purchaseDate: updates.purchaseDate }
+        : item
+      ));
+    }
+    return true;
+  } catch (error) {
+    console.error('Erro ao atualizar compra no histórico:', error);
+    return false;
+  }
+};
+
 export const removeFromPurchaseHistory = async (id) => {
   try {
     const current = await getPurchaseHistory();

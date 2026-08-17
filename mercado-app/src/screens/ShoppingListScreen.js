@@ -331,7 +331,6 @@ export default function ShoppingListScreen() {
     });
   const pendingItems = filteredItems.filter(item => item.status === 'pending');
   const purchasedItems = filteredItems.filter(item => item.status === 'purchased');
-  const allItemsPurchased = shoppingList.length > 0 && shoppingList.every(item => item.status === 'purchased');
 
   const renderItem = ({ item }) => {
     const category = CATEGORIES.find(c => c.id === item.category);
@@ -423,15 +422,19 @@ export default function ShoppingListScreen() {
           <Ionicons name="search-outline" size={21} color="#4CAF50" />
           <TextInput
             style={styles.mainSearchInput}
-            placeholder="O que você precisa comprar?"
+            placeholder="Buscar ou adicionar produto"
             placeholderTextColor="#8888aa"
             value={mainSearchQuery}
             onChangeText={handleMainSearch}
             returnKeyType="search"
           />
-          {mainSearchQuery.length > 0 && (
+          {mainSearchQuery.length > 0 ? (
             <TouchableOpacity onPress={() => { setMainSearchQuery(''); setMainSuggestions([]); }}>
               <Ionicons name="close-circle" size={20} color="#8888aa" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity accessibilityLabel="Cadastrar novo produto" onPress={() => handleOpenAddItem()}>
+              <Ionicons name="add-circle-outline" size={22} color="#4CAF50" />
             </TouchableOpacity>
           )}
         </View>
@@ -454,11 +457,6 @@ export default function ShoppingListScreen() {
         )}
       </View>
 
-      <TouchableOpacity style={styles.addButton} onPress={() => handleOpenAddItem()}>
-        <Ionicons name="add" size={22} color="#fff" />
-        <Text style={styles.addButtonText}>Cadastrar produto manualmente</Text>
-      </TouchableOpacity>
-
       <View style={styles.filterSection}>
         <Text style={styles.filterLabel}>Organizar por setor</Text>
         <TouchableOpacity style={styles.categoryField} onPress={() => openCategoryPicker('filter')}>
@@ -469,21 +467,6 @@ export default function ShoppingListScreen() {
           <Ionicons name="chevron-down" size={18} color="#aaaac0" />
         </TouchableOpacity>
       </View>
-
-      {allItemsPurchased && !selectedCategory && (
-        <View style={styles.completionBanner}>
-          <View style={styles.completionIcon}>
-            <Ionicons name="checkmark" size={22} color="#fff" />
-          </View>
-          <View style={styles.completionCopy}>
-            <Text style={styles.completionTitle}>Você concluiu esta rodada</Text>
-            <Text style={styles.completionText}>Para comprar mais coisas, adicione novos produtos à mesma lista.</Text>
-          </View>
-          <TouchableOpacity style={styles.completionButton} onPress={() => handleOpenAddItem()}>
-            <Ionicons name="add" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      )}
 
       {/* Lista Pendentes */}
       {pendingItems.length > 0 && (
@@ -878,15 +861,7 @@ const styles = StyleSheet.create({
   mainSuggestionCopy: { flex: 1 },
   newProductSuggestion: { flexDirection: 'row', alignItems: 'center', padding: 14 },
   newProductSuggestionText: { color: '#FFB74D', fontSize: 15, fontWeight: '600', marginLeft: 10 },
-  addButton: { margin: 16, flexDirection: 'row', backgroundColor: '#4CAF50', padding: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  addButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
   section: { paddingHorizontal: 16, marginBottom: 16 },
-  completionBanner: { marginHorizontal: 16, marginBottom: 16, padding: 14, borderRadius: 12, backgroundColor: '#1d4c30', flexDirection: 'row', alignItems: 'center' },
-  completionIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  completionCopy: { flex: 1, paddingRight: 8 },
-  completionTitle: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  completionText: { color: '#c9e9cf', fontSize: 12, lineHeight: 17, marginTop: 2 },
-  completionButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center' },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
   filterSection: { marginBottom: 12 },
   filterLabel: { color: '#aaaac0', fontSize: 13, fontWeight: '600', marginHorizontal: 16, marginBottom: 8 },
