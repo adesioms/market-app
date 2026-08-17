@@ -417,6 +417,9 @@ export default function ShoppingListScreen() {
     });
   const purchasedItems = shoppingList.filter(item => item.status === 'purchased');
   const pendingRoundCount = shoppingList.filter(item => item.status !== 'purchased').length;
+  const pendingCatalogItems = filteredCatalog.filter(product => getActiveItemForCatalog(product)?.status === 'pending');
+  const purchasedCatalogItems = filteredCatalog.filter(product => getActiveItemForCatalog(product)?.status === 'purchased');
+  const otherCatalogItems = filteredCatalog.filter(product => !getActiveItemForCatalog(product));
 
   const renderCatalogItem = ({ item }) => {
     const category = CATEGORIES.find(c => c.id === item.category);
@@ -552,14 +555,6 @@ export default function ShoppingListScreen() {
         )}
       </View>
 
-      <View style={styles.catalogHeader}>
-        <View>
-          <Text style={styles.sectionTitle}>Todos os produtos</Text>
-          <Text style={styles.catalogHelper}>Marque o check para colocar na compra atual.</Text>
-        </View>
-        <Text style={styles.catalogCount}>{filteredCatalog.length}</Text>
-      </View>
-
       <View style={styles.filterSection}>
         <Text style={styles.filterLabel}>Filtrar produtos por setor</Text>
         <TouchableOpacity style={styles.categoryField} onPress={() => openCategoryPicker('filter')}>
@@ -571,20 +566,71 @@ export default function ShoppingListScreen() {
         </TouchableOpacity>
       </View>
 
-      {filteredCatalog.length > 0 ? (
+      {pendingRoundCount === 0 && purchasedItems.length === 0 && filteredCatalog.length > 0 && (
+        <View style={styles.emptyRoundHint}>
+          <Ionicons name="checkmark-circle-outline" size={19} color="#FFB74D" />
+          <Text style={styles.emptyRoundHintText}>Nenhum produto está na compra atual. Use o + para escolher o que vai comprar.</Text>
+        </View>
+      )}
+
+      {pendingCatalogItems.length > 0 && (
+        <View style={styles.listSectionBlock}>
+          <View style={styles.listSectionHeader}>
+            <View style={styles.listSectionCopy}>
+              <Text style={styles.listSectionTitle}>A comprar agora</Text>
+              <Text style={styles.listSectionHelper}>Itens selecionados para esta compra</Text>
+            </View>
+            <Text style={styles.listSectionCount}>{pendingCatalogItems.length}</Text>
+          </View>
+          <FlatList
+            data={pendingCatalogItems}
+            renderItem={renderCatalogItem}
+            keyExtractor={item => `pending-${item.id}`}
+            scrollEnabled={false}
+          />
+        </View>
+      )}
+
+      {purchasedCatalogItems.length > 0 && (
+        <View style={[styles.listSectionBlock, styles.purchasedSectionBlock]}>
+          <View style={styles.listSectionHeader}>
+            <View style={styles.listSectionCopy}>
+              <Text style={styles.listSectionTitle}>Comprados nesta compra</Text>
+              <Text style={styles.listSectionHelper}>Já marcados e registrados no Histórico</Text>
+            </View>
+            <Text style={[styles.listSectionCount, styles.purchasedSectionCount]}>{purchasedCatalogItems.length}</Text>
+          </View>
+          <FlatList
+            data={purchasedCatalogItems}
+            renderItem={renderCatalogItem}
+            keyExtractor={item => `purchased-${item.id}`}
+            scrollEnabled={false}
+          />
+        </View>
+      )}
+
+      <View style={styles.catalogHeader}>
+        <View>
+          <Text style={styles.sectionTitle}>Todos os produtos</Text>
+          <Text style={styles.catalogHelper}>Produtos cadastrados que ainda não estão nesta compra</Text>
+        </View>
+        <Text style={styles.catalogCount}>{filteredCatalog.length}</Text>
+      </View>
+
+      {otherCatalogItems.length > 0 ? (
         <FlatList
-          data={filteredCatalog}
+          data={otherCatalogItems}
           renderItem={renderCatalogItem}
-          keyExtractor={item => item.id}
+          keyExtractor={item => `catalog-${item.id}`}
           scrollEnabled={false}
         />
-      ) : (
+      ) : filteredCatalog.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="list-outline" size={64} color="#8888aa" />
           <Text style={styles.emptyText}>Sua lista geral está vazia</Text>
           <Text style={styles.emptySubtext}>Use a busca ou o botão + para cadastrar os produtos que você compra normalmente.</Text>
         </View>
-      )}
+      ) : null}
 
       </ScrollView>
 
@@ -942,9 +988,19 @@ const styles = StyleSheet.create({
   roundSummaryText: { color: '#c9e9cf', fontSize: 12, marginTop: 3 },
   newRoundButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4CAF50', paddingVertical: 9, paddingHorizontal: 11, borderRadius: 9 },
   newRoundButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
-  catalogHeader: { paddingHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  catalogHeader: { paddingHorizontal: 16, marginTop: 8, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   catalogHelper: { color: '#8888aa', fontSize: 12, marginTop: 3 },
   catalogCount: { color: '#4CAF50', fontSize: 16, fontWeight: 'bold', backgroundColor: '#1d4c30', minWidth: 30, textAlign: 'center', paddingVertical: 5, borderRadius: 14 },
+  listSectionBlock: { marginBottom: 14 },
+  purchasedSectionBlock: { marginTop: 2 },
+  listSectionHeader: { paddingHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  listSectionCopy: { flex: 1, paddingRight: 12 },
+  listSectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  listSectionHelper: { color: '#8888aa', fontSize: 12, marginTop: 3 },
+  listSectionCount: { color: '#fff', fontSize: 14, fontWeight: 'bold', backgroundColor: '#b87816', minWidth: 28, textAlign: 'center', paddingVertical: 4, borderRadius: 14 },
+  purchasedSectionCount: { backgroundColor: '#34783f' },
+  emptyRoundHint: { marginHorizontal: 16, marginBottom: 14, padding: 12, borderRadius: 10, backgroundColor: '#2a2a3e', flexDirection: 'row', alignItems: 'center' },
+  emptyRoundHintText: { flex: 1, color: '#c9c9d9', fontSize: 12, lineHeight: 17, marginLeft: 8 },
   section: { paddingHorizontal: 16, marginBottom: 16 },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
   filterSection: { marginBottom: 12 },
