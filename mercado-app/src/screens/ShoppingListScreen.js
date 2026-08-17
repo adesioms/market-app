@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, unmarkAsPurchased, migrateToUnifiedList, searchSuggestions, getPurchaseDefaults, getDefaultPriceUnit, getItemTotal, CATEGORIES, UNITS, WEIGHT_VOLUME_UNITS } from '../utils/storage';
 
 const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
@@ -18,6 +19,7 @@ const moneyDigitsFromValue = (value) => {
 const parseQuantity = (value) => Number.parseFloat(String(value || '').replace(',', '.')) || 0;
 
 export default function ShoppingListScreen() {
+  const insets = useSafeAreaInsets();
   const [shoppingList, setShoppingList] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -329,6 +331,7 @@ export default function ShoppingListScreen() {
     });
   const pendingItems = filteredItems.filter(item => item.status === 'pending');
   const purchasedItems = filteredItems.filter(item => item.status === 'purchased');
+  const allItemsPurchased = shoppingList.length > 0 && shoppingList.every(item => item.status === 'purchased');
 
   const renderItem = ({ item }) => {
     const category = CATEGORIES.find(c => c.id === item.category);
@@ -391,9 +394,8 @@ export default function ShoppingListScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <ScrollView style={styles.listScroll} contentContainerStyle={styles.listContent} nestedScrollEnabled>
-      {/* Header com Total */}
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Barra fixa: fica abaixo do relógio, bateria e demais ícones do sistema. */}
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Text style={styles.headerTitle}>Minha Lista</Text>
@@ -414,6 +416,7 @@ export default function ShoppingListScreen() {
         </View>
       </View>
 
+      <ScrollView style={styles.listScroll} contentContainerStyle={styles.listContent} nestedScrollEnabled>
       {/* Busca principal */}
       <View style={styles.mainSearchSection}>
         <View style={styles.mainSearchField}>
@@ -467,6 +470,21 @@ export default function ShoppingListScreen() {
         </TouchableOpacity>
       </View>
 
+      {allItemsPurchased && !selectedCategory && (
+        <View style={styles.completionBanner}>
+          <View style={styles.completionIcon}>
+            <Ionicons name="checkmark" size={22} color="#fff" />
+          </View>
+          <View style={styles.completionCopy}>
+            <Text style={styles.completionTitle}>Você concluiu esta rodada</Text>
+            <Text style={styles.completionText}>Para comprar mais coisas, adicione novos produtos à mesma lista.</Text>
+          </View>
+          <TouchableOpacity style={styles.completionButton} onPress={() => handleOpenAddItem()}>
+            <Ionicons name="add" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Lista Pendentes */}
       {pendingItems.length > 0 && (
         <View style={styles.section}>
@@ -514,7 +532,7 @@ export default function ShoppingListScreen() {
 
       {/* Menu sanduíche */}
       <Modal visible={menuVisible} animationType="fade" transparent onRequestClose={() => setMenuVisible(false)}>
-        <View style={styles.menuOverlay}>
+        <View style={[styles.menuOverlay, { paddingTop: insets.top + 8 }]}>
           <View style={styles.menuContent}>
             <Text style={styles.menuTitle}>Mais opções</Text>
             <TouchableOpacity
@@ -863,6 +881,12 @@ const styles = StyleSheet.create({
   addButton: { margin: 16, flexDirection: 'row', backgroundColor: '#4CAF50', padding: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   addButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
   section: { paddingHorizontal: 16, marginBottom: 16 },
+  completionBanner: { marginHorizontal: 16, marginBottom: 16, padding: 14, borderRadius: 12, backgroundColor: '#1d4c30', flexDirection: 'row', alignItems: 'center' },
+  completionIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  completionCopy: { flex: 1, paddingRight: 8 },
+  completionTitle: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  completionText: { color: '#c9e9cf', fontSize: 12, lineHeight: 17, marginTop: 2 },
+  completionButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center' },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
   filterSection: { marginBottom: 12 },
   filterLabel: { color: '#aaaac0', fontSize: 13, fontWeight: '600', marginHorizontal: 16, marginBottom: 8 },
@@ -898,7 +922,7 @@ const styles = StyleSheet.create({
   emptySubtext: { color: '#8888aa', fontSize: 14, marginTop: 8, textAlign: 'center' },
   filteredEmptyContainer: { padding: 32, justifyContent: 'center', alignItems: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
-  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.68)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 42, paddingRight: 12 },
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.68)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingRight: 12 },
   menuContent: { width: 250, backgroundColor: '#1a1a2e', borderRadius: 16, padding: 16, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
   menuTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#2f2f43' },

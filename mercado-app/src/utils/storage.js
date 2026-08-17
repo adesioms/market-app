@@ -221,15 +221,10 @@ export const addToShoppingList = async (item) => {
   try {
     const current = await getShoppingList();
     const productKey = getProductKey(item);
-    const existing = current.find(currentItem => getProductKey(currentItem) === productKey);
-    if (existing) {
-      if (existing.status === 'purchased') {
-        const reopened = { ...existing, status: 'pending', purchaseDate: null, price: null, originalPrice: null };
-        await saveShoppingList(current.map(currentItem => currentItem.id === existing.id ? reopened : currentItem));
-        return reopened;
-      }
-      return existing;
-    }
+    const existing = current.find(currentItem =>
+      currentItem.status !== 'purchased' && getProductKey(currentItem) === productKey
+    );
+    if (existing) return existing;
     const category = normalizeCategoryId(item.category);
     const defaults = getPurchaseDefaults(category);
     const unit = item.unit ?? defaults.unit;
