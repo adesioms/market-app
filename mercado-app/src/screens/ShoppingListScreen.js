@@ -22,6 +22,7 @@ export default function ShoppingListScreen() {
   const insets = useSafeAreaInsets();
   const [shoppingList, setShoppingList] = useState([]);
   const [productCatalog, setProductCatalog] = useState([]);
+  const [catalogExpanded, setCatalogExpanded] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -555,17 +556,6 @@ export default function ShoppingListScreen() {
         )}
       </View>
 
-      <View style={styles.filterSection}>
-        <Text style={styles.filterLabel}>Filtrar produtos por setor</Text>
-        <TouchableOpacity style={styles.categoryField} onPress={() => openCategoryPicker('filter')}>
-          <Ionicons name="funnel-outline" size={20} color="#4CAF50" />
-          <Text style={styles.categoryFieldText}>
-            {selectedCategory ? CATEGORIES.find(category => category.id === selectedCategory)?.name : 'Todos os setores'}
-          </Text>
-          <Ionicons name="chevron-down" size={18} color="#aaaac0" />
-        </TouchableOpacity>
-      </View>
-
       {pendingRoundCount === 0 && purchasedItems.length === 0 && filteredCatalog.length > 0 && (
         <View style={styles.emptyRoundHint}>
           <Ionicons name="checkmark-circle-outline" size={19} color="#FFB74D" />
@@ -609,28 +599,55 @@ export default function ShoppingListScreen() {
         </View>
       )}
 
-      <View style={styles.catalogHeader}>
-        <View>
+      <TouchableOpacity
+        style={styles.catalogHeader}
+        onPress={() => setCatalogExpanded(current => !current)}
+        accessibilityLabel={catalogExpanded ? 'Recolher lista completa de produtos' : 'Mostrar lista completa de produtos'}
+        accessibilityState={{ expanded: catalogExpanded }}
+      >
+        <View style={styles.catalogHeaderCopy}>
           <Text style={styles.sectionTitle}>Todos os produtos</Text>
-          <Text style={styles.catalogHelper}>Produtos cadastrados que ainda não estão nesta compra</Text>
+          <Text style={styles.catalogHelper}>
+            {catalogExpanded ? 'Toque para recolher a lista geral' : 'Lista geral recolhida · toque para mostrar'}
+          </Text>
         </View>
-        <Text style={styles.catalogCount}>{filteredCatalog.length}</Text>
-      </View>
+        <View style={styles.catalogHeaderAction}>
+          <Text style={styles.catalogCount}>{filteredCatalog.length}</Text>
+          <Ionicons name={catalogExpanded ? 'chevron-up' : 'chevron-down'} size={20} color="#4CAF50" />
+        </View>
+      </TouchableOpacity>
 
-      {otherCatalogItems.length > 0 ? (
-        <FlatList
-          data={otherCatalogItems}
-          renderItem={renderCatalogItem}
-          keyExtractor={item => `catalog-${item.id}`}
-          scrollEnabled={false}
-        />
-      ) : filteredCatalog.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="list-outline" size={64} color="#8888aa" />
-          <Text style={styles.emptyText}>Sua lista geral está vazia</Text>
-          <Text style={styles.emptySubtext}>Use a busca ou o botão + para cadastrar os produtos que você compra normalmente.</Text>
-        </View>
-      ) : null}
+      {catalogExpanded && (
+        <>
+          <View style={styles.filterSection}>
+            <Text style={styles.filterLabel}>Filtrar produtos por setor</Text>
+            <TouchableOpacity style={styles.categoryField} onPress={() => openCategoryPicker('filter')}>
+              <Ionicons name="funnel-outline" size={20} color="#4CAF50" />
+              <Text style={styles.categoryFieldText}>
+                {selectedCategory ? CATEGORIES.find(category => category.id === selectedCategory)?.name : 'Todos os setores'}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color="#aaaac0" />
+            </TouchableOpacity>
+          </View>
+
+          {otherCatalogItems.length > 0 ? (
+            <FlatList
+              data={otherCatalogItems}
+              renderItem={renderCatalogItem}
+              keyExtractor={item => `catalog-${item.id}`}
+              scrollEnabled={false}
+            />
+          ) : filteredCatalog.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="list-outline" size={64} color="#8888aa" />
+              <Text style={styles.emptyText}>Sua lista geral está vazia</Text>
+              <Text style={styles.emptySubtext}>Use a busca ou o botão + para cadastrar os produtos que você compra normalmente.</Text>
+            </View>
+          ) : (
+            <Text style={styles.catalogEmptyFiltered}>Todos os produtos desta seção já estão na compra atual.</Text>
+          )}
+        </>
+      )}
 
       </ScrollView>
 
@@ -988,9 +1005,12 @@ const styles = StyleSheet.create({
   roundSummaryText: { color: '#c9e9cf', fontSize: 12, marginTop: 3 },
   newRoundButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4CAF50', paddingVertical: 9, paddingHorizontal: 11, borderRadius: 9 },
   newRoundButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
-  catalogHeader: { paddingHorizontal: 16, marginTop: 8, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  catalogHeader: { marginHorizontal: 16, marginTop: 8, marginBottom: 8, padding: 12, borderRadius: 10, backgroundColor: '#1a1a2e', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  catalogHeaderCopy: { flex: 1, paddingRight: 10 },
+  catalogHeaderAction: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   catalogHelper: { color: '#8888aa', fontSize: 12, marginTop: 3 },
   catalogCount: { color: '#4CAF50', fontSize: 16, fontWeight: 'bold', backgroundColor: '#1d4c30', minWidth: 30, textAlign: 'center', paddingVertical: 5, borderRadius: 14 },
+  catalogEmptyFiltered: { color: '#8888aa', fontSize: 13, textAlign: 'center', paddingHorizontal: 24, paddingVertical: 16 },
   listSectionBlock: { marginBottom: 14 },
   purchasedSectionBlock: { marginTop: 2 },
   listSectionHeader: { paddingHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
