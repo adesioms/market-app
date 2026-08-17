@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, A
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getShoppingList, getProductCatalog, addToShoppingList, updateShoppingItem, updateProductCatalogItem, removeFromShoppingList, startNewShoppingRound, markAsPurchased, unmarkAsPurchased, migrateToUnifiedList, searchSuggestions, getPurchaseDefaults, getDefaultPriceUnit, getItemTotal, getProductKey, CATEGORIES, UNITS, WEIGHT_VOLUME_UNITS } from '../utils/storage';
+import { getShoppingList, getProductCatalog, addToShoppingList, updateShoppingItem, updateProductCatalogItem, removeFromShoppingList, startNewShoppingRound, markAsPurchased, unmarkAsPurchased, migrateToUnifiedList, searchSuggestions, getPurchaseDefaults, getDefaultPriceUnit, getItemTotal, getProductKey, restoreToShoppingList, CATEGORIES, UNITS, WEIGHT_VOLUME_UNITS } from '../utils/storage';
 
 const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
 const parseMoneyDigits = (digits) => digits ? Number(digits) / 100 : null;
@@ -23,6 +23,7 @@ export default function ShoppingListScreen() {
   const [shoppingList, setShoppingList] = useState([]);
   const [productCatalog, setProductCatalog] = useState([]);
   const [catalogExpanded, setCatalogExpanded] = useState(false);
+  const [undoItem, setUndoItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -351,13 +352,35 @@ export default function ShoppingListScreen() {
   };
 
   const handleDelete = async (id) => {
-    Alert.alert('Confirmar', 'Remover este item da compra atual?', [
+    const itemToRemove = shoppingList.find(item => item.id === id);
+    if (!itemToRemove) return;
+
+    Alert.alert('Retirar desta compra?', `${itemToRemove.name} continuará na lista geral e poderá ser escolhido novamente depois.`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Remover', style: 'destructive', onPress: async () => {
-        await removeFromShoppingList(id);
+      { text: 'Retirar', style: 'destructive', onPress: async () => {
+        const removed = await removeFromShoppingList(id);
+        if (!removed) {
+          Alert.alert('Erro', 'Não foi possível retirar o produto desta compra.');
+          return;
+        }
+        setUndoItem(itemToRemove);
         loadList();
+        setTimeout(() => {
+          setUndoItem(current => current?.id === id ? null : current);
+        }, 5000);
       }}
     ]);
+  };
+
+  const handleUndoRemove = async () => {
+    if (!undoItem) return;
+    const restored = await restoreToShoppingList(undoItem);
+    if (!restored) {
+      Alert.alert('Erro', 'Não foi possível desfazer a retirada.');
+      return;
+    }
+    setUndoItem(null);
+    loadList();
   };
 
   const getActiveItemForCatalog = (product) => shoppingList.find(item =>
@@ -650,6 +673,15 @@ export default function ShoppingListScreen() {
       )}
 
       </ScrollView>
+
+      {undoItem && (
+        <View style={styles.undoBar}>
+          <Text style={styles.undoBarText}>{undoItem.name} foi retirado desta compra</Text>
+          <TouchableOpacity onPress={handleUndoRemove} accessibilityLabel={`Desfazer retirada de ${undoItem.name}`}>
+            <Text style={styles.undoActionText}>Desfazer</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Menu sanduíche */}
       <Modal visible={menuVisible} animationType="fade" transparent onRequestClose={() => setMenuVisible(false)}>
@@ -1035,6 +1067,9 @@ const styles = StyleSheet.create({
   noResultsText: { color: '#8888aa', textAlign: 'center', padding: 20 },
   listScroll: { flex: 1 },
   listContent: { paddingBottom: 24 },
+  undoBar: { marginHorizontal: 16, marginBottom: 10, paddingVertical: 11, paddingHorizontal: 13, borderRadius: 10, backgroundColor: '#2a2a3e', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  undoBarText: { flex: 1, color: '#d7d7e4', fontSize: 12, marginRight: 10 },
+  undoActionText: { color: '#FFB74D', fontSize: 13, fontWeight: 'bold' },
   itemCard: { backgroundColor: '#1a1a2e', padding: 12, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center' },
   itemPurchased: { opacity: 0.7 },
   itemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },

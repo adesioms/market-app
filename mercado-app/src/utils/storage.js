@@ -407,6 +407,19 @@ export const removeFromShoppingList = async (id) => {
   }
 };
 
+export const restoreToShoppingList = async (item) => {
+  try {
+    if (!item?.id) return false;
+    const current = await getShoppingList();
+    if (current.some(currentItem => currentItem.id === item.id)) return true;
+    await saveShoppingList([...current, item]);
+    return true;
+  } catch (error) {
+    console.error('Erro ao restaurar item na lista de compras:', error);
+    return false;
+  }
+};
+
 export const updatePurchaseHistoryForShoppingItem = async (shoppingItemId, updates) => {
   try {
     const current = await getPurchaseHistory();
