@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const STORAGE_KEYS = {
   SHOPPING_LIST: '@mercado:shoppingList',
   MASTER_LIST: '@mercado:masterList',
+  PRODUCT_CATALOG: '@mercado:productCatalog',
   PURCHASE_HISTORY: '@mercado:purchaseHistory'
 };
 
@@ -42,6 +43,15 @@ const normalizeItemCategory = (item) => ({
   ...item,
   category: normalizeCategoryId(item.category)
 });
+
+export const normalizeProductText = (value) => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/\s+/g, ' ')
+  .trim();
+
+export const getProductKey = (item) => `${normalizeProductText(item?.name)}::${normalizeProductText(item?.brand)}`;
 
 export const UNITS = ['un', 'dz', 'kg', 'g', 'L', 'mL', 'm', 'cx', 'pacote'];
 export const WEIGHT_VOLUME_UNITS = ['kg', 'g', 'L', 'mL'];
@@ -105,6 +115,9 @@ export const saveMasterList = async (items) => {
 export const addToMasterList = async (item) => {
   try {
     const current = await getMasterList();
+    const productKey = getProductKey(item);
+    const existing = current.find(currentItem => getProductKey(currentItem) === productKey);
+    if (existing) return existing;
     const newItem = { ...item, category: normalizeCategoryId(item.category), id: Date.now().toString() };
     await saveMasterList([...current, newItem]);
     return newItem;
@@ -142,6 +155,47 @@ export const updateMasterListItem = async (id, updates) => {
   }
 };
 
+// Catálogo interno da lista única. A chave antiga da Lista Mestra só é lida durante a migração.
+export const getProductCatalog = async () => {
+  try {
+    const data = await AsyncStorage.getItem(STORAGE_KEYS.PRODUCT_CATALOG);
+    return data ? JSON.parse(data).map(normalizeItemCategory) : [];
+  } catch (error) {
+    console.error('Erro ao buscar catálogo de produtos:', error);
+    return [];
+  }
+};
+
+export const saveProductCatalog = async (items) => {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.PRODUCT_CATALOG, JSON.stringify(items));
+    return true;
+  } catch (error) {
+    console.error('Erro ao salvar catálogo de produtos:', error);
+    return false;
+  }
+};
+
+export const upsertProductCatalog = async (item) => {
+  try {
+    const current = await getProductCatalog();
+    const productKey = getProductKey(item);
+    const existing = current.find(product => getProductKey(product) === productKey);
+    if (existing) return existing;
+    const newProduct = {
+      name: String(item.name || '').trim(),
+      brand: String(item.brand || '').trim(),
+      category: normalizeCategoryId(item.category),
+      id: `catalog-${Date.now()}`
+    };
+    await saveProductCatalog([...current, newProduct]);
+    return newProduct;
+  } catch (error) {
+    console.error('Erro ao atualizar catálogo de produtos:', error);
+    return null;
+  }
+};
+
 // Lista de Compras
 export const getShoppingList = async () => {
   try {
@@ -166,6 +220,16 @@ export const saveShoppingList = async (items) => {
 export const addToShoppingList = async (item) => {
   try {
     const current = await getShoppingList();
+    const productKey = getProductKey(item);
+    const existing = current.find(currentItem => getProductKey(currentItem) === productKey);
+    if (existing) {
+      if (existing.status === 'purchased') {
+        const reopened = { ...existing, status: 'pending', purchaseDate: null, price: null, originalPrice: null };
+        await saveShoppingList(current.map(currentItem => currentItem.id === existing.id ? reopened : currentItem));
+        return reopened;
+      }
+      return existing;
+    }
     const category = normalizeCategoryId(item.category);
     const defaults = getPurchaseDefaults(category);
     const unit = item.unit ?? defaults.unit;
@@ -185,6 +249,7 @@ export const addToShoppingList = async (item) => {
       isPromotion: false,
       originalPrice: null
     };
+    await upsertProductCatalog({ name: newItem.name, brand: newItem.brand, category: newItem.category });
     await saveShoppingList([...current, newItem]);
     return newItem;
   } catch (error) {
@@ -204,14 +269,79 @@ export const updateShoppingItem = async (id, updates) => {
     );
     const saved = await saveShoppingList(updated);
 
-    if (saved && existing?.status === 'purchased') {
+    if (saved) {
       const updatedItem = updated.find(item => item.id === id);
-      await updatePurchaseHistoryForShoppingItem(id, updatedItem);
+      if (updatedItem) {
+        await upsertProductCatalog(updatedItem);
+        if (existing?.status === 'purchased') {
+          await updatePurchaseHistoryForShoppingItem(id, updatedItem);
+        }
+      }
     }
 
     return saved;
   } catch (error) {
     console.error('Erro ao atualizar item:', error);
+    return false;
+  }
+};
+
+export const migrateToUnifiedList = async () => {
+  try {
+    const [shoppingList, masterList, productCatalog] = await Promise.all([
+      getShoppingList(),
+      getMasterList(),
+      getProductCatalog()
+    ]);
+    const unified = [...shoppingList];
+    const catalog = [...productCatalog];
+    masterList.forEach((masterItem) => {
+      if (!catalog.some(product => getProductKey(product) === getProductKey(masterItem))) {
+        catalog.push({
+          name: masterItem.name,
+          brand: masterItem.brand || '',
+          category: normalizeCategoryId(masterItem.category),
+          id: `catalog-legacy-${masterItem.id || Date.now()}`
+        });
+      }
+      const existingIndex = unified.findIndex(item => getProductKey(item) === getProductKey(masterItem));
+      if (existingIndex >= 0) {
+        unified[existingIndex] = {
+          ...unified[existingIndex],
+          brand: unified[existingIndex].brand || masterItem.brand || '',
+          category: normalizeCategoryId(unified[existingIndex].category || masterItem.category)
+        };
+        return;
+      }
+
+      // Produtos antigos da lista mestra permanecem como sugestões/catalogo.
+      // Eles só entram na lista ativa quando o usuário os escolhe.
+    });
+
+    await saveProductCatalog(catalog);
+    await saveShoppingList(unified);
+    return unified;
+  } catch (error) {
+    console.error('Erro ao migrar para lista única:', error);
+    return getShoppingList();
+  }
+};
+
+export const unmarkAsPurchased = async (id) => {
+  try {
+    const current = await getShoppingList();
+    const updated = current.map(item => item.id === id
+      ? { ...item, status: 'pending', purchaseDate: null }
+      : item
+    );
+    const saved = await saveShoppingList(updated);
+    if (!saved) return false;
+
+    const history = await getPurchaseHistory();
+    await savePurchaseHistory(history.filter(item => item.shoppingItemId !== id));
+    return true;
+  } catch (error) {
+    console.error('Erro ao desmarcar compra:', error);
     return false;
   }
 };
@@ -332,46 +462,26 @@ export const searchSuggestions = async (query) => {
   if (!query || query.length < 2) return [];
   
   try {
-    const masterList = await getMasterList();
-    const history = await getPurchaseHistory();
-    
-    const queryLower = query.toLowerCase();
-    
-    // Buscar na lista mestra
-    const masterMatches = masterList.filter(item => 
-      item.name.toLowerCase().includes(queryLower) ||
-      (item.brand && item.brand.toLowerCase().includes(queryLower))
+    const [shoppingList, productCatalog, masterList, history] = await Promise.all([
+      getShoppingList(),
+      getProductCatalog(),
+      getMasterList(),
+      getPurchaseHistory()
+    ]);
+    const queryLower = normalizeProductText(query);
+    const products = [...shoppingList, ...productCatalog, ...masterList, ...history];
+    const unique = products.filter((item, index, all) =>
+      index === all.findIndex(candidate => getProductKey(candidate) === getProductKey(item))
     );
-    
-    // Buscar no histórico (produtos únicos)
-    const historyProducts = {};
-    history.forEach(item => {
-      const key = `${item.name}-${item.brand || ''}`;
-      if (!historyProducts[key]) {
-        historyProducts[key] = {
-          name: item.name,
-          brand: item.brand,
-          category: item.category,
-          lastPrice: item.price,
-          source: 'history'
-        };
-      }
-    });
-    
-    const historyMatches = Object.values(historyProducts).filter(item =>
-      item.name.toLowerCase().includes(queryLower) ||
-      (item.brand && item.brand.toLowerCase().includes(queryLower))
-    );
-    
-    // Combinar resultados, priorizando lista mestra
-    const combined = [...masterMatches.map(m => ({...m, source: 'master'})), ...historyMatches];
-    
-    // Remover duplicatas
-    const unique = combined.filter((item, index, self) =>
-      index === self.findIndex(i => i.name === item.name && i.brand === item.brand)
-    );
-    
-    return unique.slice(0, 10);
+
+    return unique
+      .filter(item => {
+        const name = normalizeProductText(item.name);
+        const brand = normalizeProductText(item.brand);
+        return name.includes(queryLower) || brand.includes(queryLower);
+      })
+      .map(item => ({ ...item, source: item.status === 'purchased' ? 'history' : 'list' }))
+      .slice(0, 10);
   } catch (error) {
     console.error('Erro ao buscar sugestões:', error);
     return [];

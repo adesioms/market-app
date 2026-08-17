@@ -1,10 +1,7 @@
 import React from 'react';
-import { Text, TouchableOpacity } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import DashboardScreen from '../screens/DashboardScreen';
 import ShoppingListScreen from '../screens/ShoppingListScreen';
-import MasterListScreen from '../screens/MasterListScreen';
 import HistoryScreen from '../screens/HistoryScreen';
 import PriceComparatorScreen from '../screens/PriceComparatorScreen';
 
@@ -13,22 +10,17 @@ const Tab = createBottomTabNavigator();
 export default function AppNavigator() {
   return (
     <Tab.Navigator
+      initialRouteName="Lista"
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => {
-          let iconName;
-
-          if (route.name === 'Início') {
-            iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Lista') {
+          let iconName = 'ellipse-outline';
+          if (route.name === 'Lista') {
             iconName = focused ? 'cart' : 'cart-outline';
-          } else if (route.name === 'Comparar') {
-            iconName = focused ? 'git-compare' : 'git-compare-outline';
-          } else if (route.name === 'Mestra') {
-            iconName = focused ? 'star' : 'star-outline';
           } else if (route.name === 'Histórico') {
             iconName = focused ? 'time' : 'time-outline';
+          } else if (route.name === 'Comparar') {
+            iconName = 'git-compare-outline';
           }
-
           return <Ionicons name={iconName} size={size} color={color} />;
         },
         tabBarActiveTintColor: '#4CAF50',
@@ -43,44 +35,20 @@ export default function AppNavigator() {
         headerTintColor: '#fff',
       })}
     >
-      <Tab.Screen 
-        name="Início" 
-        component={DashboardScreen}
-        options={{ title: 'Início' }}
-      />
-      <Tab.Screen 
-        name="Lista" 
+      <Tab.Screen
+        name="Lista"
         component={ShoppingListScreen}
-        options={{ title: 'Lista de Compras' }}
+        options={{ title: 'Minha Lista', headerShown: false }}
+      />
+      <Tab.Screen
+        name="Histórico"
+        component={HistoryScreen}
+        options={{ title: 'Histórico' }}
       />
       <Tab.Screen
         name="Comparar"
         component={PriceComparatorScreen}
-        options={({ navigation }) => ({
-          title: 'Comparar preços',
-          tabBarButton: () => null,
-          tabBarStyle: { display: 'none' },
-          headerLeft: () => (
-            <TouchableOpacity
-              accessibilityLabel="Voltar ao início"
-              style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 16, padding: 4 }}
-              onPress={() => navigation.navigate('Início')}
-            >
-              <Ionicons name="arrow-back" size={22} color="#fff" />
-              <Text style={{ color: '#fff', fontSize: 15, marginLeft: 6 }}>Início</Text>
-            </TouchableOpacity>
-          )
-        })}
-      />
-      <Tab.Screen
-        name="Mestra"
-        component={MasterListScreen}
-        options={{ title: 'Lista Mestra' }}
-      />
-      <Tab.Screen 
-        name="Histórico" 
-        component={HistoryScreen}
-        options={{ title: 'Histórico' }}
+        options={{ title: 'Comparar preços' }}
       />
     </Tab.Navigator>
   );

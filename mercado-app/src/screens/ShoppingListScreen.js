@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, searchSuggestions, getPurchaseDefaults, getDefaultPriceUnit, getItemTotal, CATEGORIES, UNITS, WEIGHT_VOLUME_UNITS } from '../utils/storage';
+import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, unmarkAsPurchased, migrateToUnifiedList, searchSuggestions, getPurchaseDefaults, getDefaultPriceUnit, getItemTotal, CATEGORIES, UNITS, WEIGHT_VOLUME_UNITS } from '../utils/storage';
 
 const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
 const parseMoneyDigits = (digits) => digits ? Number(digits) / 100 : null;
@@ -20,6 +20,7 @@ const parseQuantity = (value) => Number.parseFloat(String(value || '').replace('
 export default function ShoppingListScreen() {
   const [shoppingList, setShoppingList] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -27,6 +28,8 @@ export default function ShoppingListScreen() {
   const [editingItem, setEditingItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
+  const [mainSearchQuery, setMainSearchQuery] = useState('');
+  const [mainSuggestions, setMainSuggestions] = useState([]);
   const [purchaseData, setPurchaseData] = useState({ priceDigits: '', quantity: '', unit: 'un', priceMode: 'total', isPromotion: false, originalPriceDigits: '' });
   const [unitModalVisible, setUnitModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -36,7 +39,7 @@ export default function ShoppingListScreen() {
   const [unitPickerTarget, setUnitPickerTarget] = useState('purchase');
 
   const loadList = useCallback(async () => {
-    const list = await getShoppingList();
+    const list = await migrateToUnifiedList();
     setShoppingList(list);
   }, []);
 
@@ -46,11 +49,36 @@ export default function ShoppingListScreen() {
     }, [loadList])
   );
 
-  const handleOpenAddItem = () => {
-    setNewItem({ name: '', brand: '', category: 'outros' });
-    setSearchQuery('');
+  const handleOpenAddItem = (initialName = '') => {
+    setNewItem({ name: initialName, brand: '', category: 'outros' });
+    setSearchQuery(initialName);
     setSuggestions([]);
     setModalVisible(true);
+  };
+
+  const handleMainSearch = async (text) => {
+    setMainSearchQuery(text);
+    if (text.trim().length >= 2) {
+      const results = await searchSuggestions(text);
+      setMainSuggestions(results);
+    } else {
+      setMainSuggestions([]);
+    }
+  };
+
+  const handleSelectMainSuggestion = async (suggestion) => {
+    const added = await addToShoppingList({
+      name: suggestion.name,
+      brand: suggestion.brand || '',
+      category: suggestion.category || 'outros'
+    });
+    if (!added) {
+      Alert.alert('Erro', 'Não foi possível adicionar o produto. Tente novamente.');
+      return;
+    }
+    setMainSearchQuery('');
+    setMainSuggestions([]);
+    loadList();
   };
 
   const handleAddItem = async () => {
@@ -74,6 +102,8 @@ export default function ShoppingListScreen() {
     setNewItem({ name: '', brand: '', category: 'outros' });
     setSearchQuery('');
     setSuggestions([]);
+    setMainSearchQuery('');
+    setMainSuggestions([]);
     setModalVisible(false);
     loadList();
   };
@@ -255,6 +285,27 @@ export default function ShoppingListScreen() {
     loadList();
   };
 
+  const handleTogglePurchased = async (item) => {
+    const updated = item.status === 'purchased'
+      ? await unmarkAsPurchased(item.id)
+      : await markAsPurchased(item.id, {
+        price: item.price ?? null,
+        priceMode: item.priceMode || 'total',
+        priceUnit: item.priceUnit || getDefaultPriceUnit(item.unit),
+        priceIsTotal: item.priceMode !== 'unit',
+        quantity: item.quantity ?? null,
+        unit: item.unit || 'un',
+        isPromotion: Boolean(item.isPromotion),
+        originalPrice: item.originalPrice ?? null
+      });
+
+    if (!updated) {
+      Alert.alert('Erro', 'Não foi possível atualizar o item. Tente novamente.');
+      return;
+    }
+    loadList();
+  };
+
   const handleDelete = async (id) => {
     Alert.alert('Confirmar', 'Remover este item?', [
       { text: 'Cancelar', style: 'cancel' },
@@ -320,17 +371,17 @@ export default function ShoppingListScreen() {
           </View>
         </TouchableOpacity>
         <View style={styles.itemActions}>
-          {item.status === 'pending' ? (
-            <TouchableOpacity
-              accessibilityLabel={`Registrar compra de ${item.name}`}
-              style={styles.buyButton}
-              onPress={() => handleOpenPurchase(item)}
-            >
-              <Ionicons name="cart" size={20} color="#fff" />
-            </TouchableOpacity>
-          ) : (
-            <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-          )}
+          <TouchableOpacity
+            accessibilityLabel={item.status === 'pending' ? `Marcar ${item.name} como comprado` : `Desmarcar ${item.name} como comprado`}
+            style={[styles.checkButton, item.status === 'purchased' && styles.checkButtonActive]}
+            onPress={() => handleTogglePurchased(item)}
+          >
+            <Ionicons
+              name={item.status === 'purchased' ? 'checkmark' : 'checkmark-outline'}
+              size={22}
+              color={item.status === 'purchased' ? '#fff' : '#4CAF50'}
+            />
+          </TouchableOpacity>
           <TouchableOpacity accessibilityLabel={`Remover ${item.name}`} onPress={() => handleDelete(item.id)}>
             <Ionicons name="trash-outline" size={20} color="#F44336" />
           </TouchableOpacity>
@@ -344,17 +395,65 @@ export default function ShoppingListScreen() {
       <ScrollView style={styles.listScroll} contentContainerStyle={styles.listContent} nestedScrollEnabled>
       {/* Header com Total */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Lista de Compras</Text>
-        <View style={styles.totalContainer}>
-          <Text style={styles.totalLabel}>Total informado:</Text>
-          <Text style={styles.totalValue}>R$ {calculateTotal().toFixed(2).replace('.', ',')}</Text>
+        <View style={styles.headerCopy}>
+          <Text style={styles.headerTitle}>Minha Lista</Text>
+          <Text style={styles.headerSubtitle}>Marque o que você já comprou</Text>
+        </View>
+        <View style={styles.headerActions}>
+          <View style={styles.totalContainer}>
+            <Text style={styles.totalLabel}>Total informado:</Text>
+            <Text style={styles.totalValue}>R$ {calculateTotal().toFixed(2).replace('.', ',')}</Text>
+          </View>
+          <TouchableOpacity
+            accessibilityLabel="Abrir mais opções"
+            style={styles.menuButton}
+            onPress={() => setMenuVisible(true)}
+          >
+            <Ionicons name="menu" size={24} color="#fff" />
+          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Botão Adicionar */}
-      <TouchableOpacity style={styles.addButton} onPress={handleOpenAddItem}>
-        <Ionicons name="add" size={24} color="#fff" />
-        <Text style={styles.addButtonText}>Adicionar Item</Text>
+      {/* Busca principal */}
+      <View style={styles.mainSearchSection}>
+        <View style={styles.mainSearchField}>
+          <Ionicons name="search-outline" size={21} color="#4CAF50" />
+          <TextInput
+            style={styles.mainSearchInput}
+            placeholder="O que você precisa comprar?"
+            placeholderTextColor="#8888aa"
+            value={mainSearchQuery}
+            onChangeText={handleMainSearch}
+            returnKeyType="search"
+          />
+          {mainSearchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => { setMainSearchQuery(''); setMainSuggestions([]); }}>
+              <Ionicons name="close-circle" size={20} color="#8888aa" />
+            </TouchableOpacity>
+          )}
+        </View>
+        {mainSearchQuery.trim().length >= 2 && (
+          <View style={styles.mainSuggestionsList}>
+            {mainSuggestions.map((suggestion, index) => (
+              <TouchableOpacity key={`${suggestion.name}-${suggestion.brand || ''}-${index}`} style={styles.mainSuggestionItem} onPress={() => handleSelectMainSuggestion(suggestion)}>
+                <View style={styles.mainSuggestionCopy}>
+                  <Text style={styles.suggestionName}>{suggestion.name}</Text>
+                  {suggestion.brand ? <Text style={styles.suggestionBrand}>{suggestion.brand}</Text> : null}
+                </View>
+                <Ionicons name="add-circle-outline" size={23} color="#4CAF50" />
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.newProductSuggestion} onPress={() => handleOpenAddItem(mainSearchQuery.trim())}>
+              <Ionicons name="create-outline" size={21} color="#FFB74D" />
+              <Text style={styles.newProductSuggestionText}>Adicionar novo produto</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      <TouchableOpacity style={styles.addButton} onPress={() => handleOpenAddItem()}>
+        <Ionicons name="add" size={22} color="#fff" />
+        <Text style={styles.addButtonText}>Cadastrar produto manualmente</Text>
       </TouchableOpacity>
 
       <View style={styles.filterSection}>
@@ -371,7 +470,8 @@ export default function ShoppingListScreen() {
       {/* Lista Pendentes */}
       {pendingItems.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pendentes ({pendingItems.length})</Text>
+                      <Text style={styles.sectionTitle}>A comprar ({pendingItems.length})</Text>
+
           <FlatList
             data={pendingItems}
             renderItem={renderItem}
@@ -411,6 +511,40 @@ export default function ShoppingListScreen() {
       )}
 
       </ScrollView>
+
+      {/* Menu sanduíche */}
+      <Modal visible={menuVisible} animationType="fade" transparent onRequestClose={() => setMenuVisible(false)}>
+        <View style={styles.menuOverlay}>
+          <View style={styles.menuContent}>
+            <Text style={styles.menuTitle}>Mais opções</Text>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                Alert.alert('Como usar', 'Adicione produtos pela busca, toque em um item para editar e marque o check quando terminar a compra. Produtos já cadastrados aparecem como sugestões para evitar duplicatas.');
+              }}
+            >
+              <Ionicons name="help-circle-outline" size={22} color="#4CAF50" />
+              <Text style={styles.menuItemText}>Como usar a lista</Text>
+            </TouchableOpacity>
+            {selectedCategory && (
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setSelectedCategory(null);
+                  setMenuVisible(false);
+                }}
+              >
+                <Ionicons name="funnel-outline" size={22} color="#4CAF50" />
+                <Text style={styles.menuItemText}>Limpar filtro de setor</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.menuCloseButton} onPress={() => setMenuVisible(false)}>
+              <Text style={styles.cancelButtonText}>Fechar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal Adicionar Item */}
       <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
@@ -488,30 +622,15 @@ export default function ShoppingListScreen() {
                 onChangeText={(brand) => setEditingItem({ ...editingItem, brand })}
               />
 
-              <View style={styles.row}>
-                <View style={[styles.fieldColumn, styles.halfField, styles.leftField]}>
-                  <Text style={styles.label}>Quantidade</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="1"
-                    placeholderTextColor="#8888aa"
-                    keyboardType="decimal-pad"
-                    value={editingItem?.quantity || ''}
-                    onChangeText={(quantity) => setEditingItem({ ...editingItem, quantity })}
-                  />
-                </View>
-                <View style={[styles.fieldColumn, styles.halfField]}>
-                  <Text style={styles.label}>Valor total (R$)</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Opcional"
-                    placeholderTextColor="#8888aa"
-                    keyboardType="decimal-pad"
-                    value={formatMoneyDigits(editingItem?.priceDigits)}
-                    onChangeText={(value) => setEditingItem({ ...editingItem, priceDigits: onlyDigits(value) })}
-                  />
-                </View>
-              </View>
+              <Text style={styles.label}>Quantidade</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Opcional até passar no caixa"
+                placeholderTextColor="#8888aa"
+                keyboardType="decimal-pad"
+                value={editingItem?.quantity || ''}
+                onChangeText={(quantity) => setEditingItem({ ...editingItem, quantity })}
+              />
 
               <Text style={styles.label}>Unidade de compra</Text>
               <TouchableOpacity style={styles.unitField} onPress={() => openUnitPicker('edit')}>
@@ -725,11 +844,23 @@ export default function ShoppingListScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f1a' },
   header: { padding: 16, backgroundColor: '#1a1a2e', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerCopy: { flex: 1, paddingRight: 12 },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  totalContainer: { flexDirection: 'row', alignItems: 'center' },
+  headerSubtitle: { color: '#8888aa', fontSize: 12, marginTop: 4 },
+  headerActions: { alignItems: 'flex-end' },
+  totalContainer: { alignItems: 'flex-end' },
+  menuButton: { marginTop: 8, padding: 4 },
   totalLabel: { color: '#8888aa', marginRight: 8 },
   totalValue: { color: '#4CAF50', fontSize: 18, fontWeight: 'bold' },
-  addButton: { margin: 16, flexDirection: 'row', backgroundColor: '#4CAF50', padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  mainSearchSection: { marginHorizontal: 16, marginTop: 16 },
+  mainSearchField: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a2a3e', borderRadius: 12, paddingHorizontal: 14, minHeight: 52 },
+  mainSearchInput: { flex: 1, color: '#fff', fontSize: 16, marginLeft: 10, paddingVertical: 10 },
+  mainSuggestionsList: { backgroundColor: '#1a1a2e', borderRadius: 10, marginTop: 6, overflow: 'hidden' },
+  mainSuggestionItem: { flexDirection: 'row', alignItems: 'center', padding: 13, borderBottomWidth: 1, borderBottomColor: '#2f2f43' },
+  mainSuggestionCopy: { flex: 1 },
+  newProductSuggestion: { flexDirection: 'row', alignItems: 'center', padding: 14 },
+  newProductSuggestionText: { color: '#FFB74D', fontSize: 15, fontWeight: '600', marginLeft: 10 },
+  addButton: { margin: 16, flexDirection: 'row', backgroundColor: '#4CAF50', padding: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   addButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
   section: { paddingHorizontal: 16, marginBottom: 16 },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
@@ -760,12 +891,19 @@ const styles = StyleSheet.create({
   itemTextPurchased: { textDecorationLine: 'line-through' },
   promotionBadge: { backgroundColor: '#FF9800', color: '#fff', fontSize: 10, paddingHorizontal: 4, borderRadius: 4, marginLeft: 4 },
   itemActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  buyButton: { backgroundColor: '#4CAF50', padding: 8, borderRadius: 8 },
+  checkButton: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', marginRight: 4 },
+  checkButtonActive: { backgroundColor: '#4CAF50' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: '#fff', fontSize: 18, marginTop: 16 },
   emptySubtext: { color: '#8888aa', fontSize: 14, marginTop: 8, textAlign: 'center' },
   filteredEmptyContainer: { padding: 32, justifyContent: 'center', alignItems: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.68)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 42, paddingRight: 12 },
+  menuContent: { width: 250, backgroundColor: '#1a1a2e', borderRadius: 16, padding: 16, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
+  menuTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#2f2f43' },
+  menuItemText: { color: '#fff', fontSize: 15, marginLeft: 12 },
+  menuCloseButton: { backgroundColor: '#2a2a3e', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 14 },
   modalContent: { backgroundColor: '#1a1a2e', padding: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   formModalContent: { backgroundColor: '#1a1a2e', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%' },
   modalScrollContent: { padding: 24 },
