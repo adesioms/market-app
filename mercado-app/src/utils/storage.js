@@ -180,19 +180,52 @@ export const upsertProductCatalog = async (item) => {
   try {
     const current = await getProductCatalog();
     const productKey = getProductKey(item);
-    const existing = current.find(product => getProductKey(product) === productKey);
-    if (existing) return existing;
-    const newProduct = {
+    const existingIndex = current.findIndex(product =>
+      (item.catalogId && product.id === item.catalogId) || getProductKey(product) === productKey
+    );
+    const normalized = {
       name: String(item.name || '').trim(),
       brand: String(item.brand || '').trim(),
-      category: normalizeCategoryId(item.category),
-      id: `catalog-${Date.now()}`
+      category: normalizeCategoryId(item.category)
+    };
+
+    if (existingIndex >= 0) {
+      const updatedProduct = { ...current[existingIndex], ...normalized };
+      const updated = [...current];
+      updated[existingIndex] = updatedProduct;
+      await saveProductCatalog(updated);
+      return updatedProduct;
+    }
+
+    const newProduct = {
+      ...normalized,
+      id: item.catalogId || `catalog-${Date.now()}`
     };
     await saveProductCatalog([...current, newProduct]);
     return newProduct;
   } catch (error) {
     console.error('Erro ao atualizar catálogo de produtos:', error);
     return null;
+  }
+};
+
+export const updateProductCatalogItem = async (id, updates) => {
+  try {
+    const current = await getProductCatalog();
+    const updated = current.map(item => item.id === id
+      ? {
+          ...item,
+          name: String(updates.name ?? item.name).trim(),
+          brand: String(updates.brand ?? item.brand).trim(),
+          category: normalizeCategoryId(updates.category ?? item.category)
+        }
+      : item
+    );
+    await saveProductCatalog(updated);
+    return true;
+  } catch (error) {
+    console.error('Erro ao editar produto do catálogo:', error);
+    return false;
   }
 };
 
@@ -221,16 +254,20 @@ export const addToShoppingList = async (item) => {
   try {
     const current = await getShoppingList();
     const productKey = getProductKey(item);
-    const existing = current.find(currentItem =>
-      currentItem.status !== 'purchased' && getProductKey(currentItem) === productKey
-    );
+    const existing = current.find(currentItem => getProductKey(currentItem) === productKey);
     if (existing) return existing;
+
     const category = normalizeCategoryId(item.category);
     const defaults = getPurchaseDefaults(category);
     const unit = item.unit ?? defaults.unit;
     const priceMode = item.priceMode ?? (WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total');
+    const catalog = await getProductCatalog();
+    const catalogProduct = catalog.find(product =>
+      (item.catalogId && product.id === item.catalogId) || getProductKey(product) === productKey
+    );
     const newItem = {
       ...item,
+      catalogId: item.catalogId || catalogProduct?.id,
       category,
       id: Date.now().toString(),
       status: 'pending', // pending, purchased
@@ -244,9 +281,10 @@ export const addToShoppingList = async (item) => {
       isPromotion: false,
       originalPrice: null
     };
-    await upsertProductCatalog({ name: newItem.name, brand: newItem.brand, category: newItem.category });
-    await saveShoppingList([...current, newItem]);
-    return newItem;
+    const catalogItem = await upsertProductCatalog({ ...newItem, catalogId: newItem.catalogId });
+    const savedItem = { ...newItem, catalogId: catalogItem?.id || newItem.catalogId };
+    await saveShoppingList([...current, savedItem]);
+    return savedItem;
   } catch (error) {
     console.error('Erro ao adicionar à lista de compras:', error);
     return null;
@@ -267,7 +305,7 @@ export const updateShoppingItem = async (id, updates) => {
     if (saved) {
       const updatedItem = updated.find(item => item.id === id);
       if (updatedItem) {
-        await upsertProductCatalog(updatedItem);
+        await upsertProductCatalog({ ...updatedItem, catalogId: updatedItem.catalogId || existing?.catalogId });
         if (existing?.status === 'purchased') {
           await updatePurchaseHistoryForShoppingItem(id, updatedItem);
         }
@@ -283,34 +321,35 @@ export const updateShoppingItem = async (id, updates) => {
 
 export const migrateToUnifiedList = async () => {
   try {
-    const [shoppingList, masterList, productCatalog] = await Promise.all([
+    const [shoppingList, masterList, productCatalog, history] = await Promise.all([
       getShoppingList(),
       getMasterList(),
-      getProductCatalog()
+      getProductCatalog(),
+      getPurchaseHistory()
     ]);
-    const unified = [...shoppingList];
-    const catalog = [...productCatalog];
-    masterList.forEach((masterItem) => {
-      if (!catalog.some(product => getProductKey(product) === getProductKey(masterItem))) {
-        catalog.push({
-          name: masterItem.name,
-          brand: masterItem.brand || '',
-          category: normalizeCategoryId(masterItem.category),
-          id: `catalog-legacy-${masterItem.id || Date.now()}`
-        });
-      }
-      const existingIndex = unified.findIndex(item => getProductKey(item) === getProductKey(masterItem));
-      if (existingIndex >= 0) {
-        unified[existingIndex] = {
-          ...unified[existingIndex],
-          brand: unified[existingIndex].brand || masterItem.brand || '',
-          category: normalizeCategoryId(unified[existingIndex].category || masterItem.category)
-        };
-        return;
-      }
+    const catalog = [];
+    const findCatalog = (item) => catalog.find(product => getProductKey(product) === getProductKey(item));
+    const addCatalogProduct = (item, preferredId) => {
+      const existing = findCatalog(item);
+      if (existing) return existing;
+      const product = {
+        name: String(item.name || '').trim(),
+        brand: String(item.brand || '').trim(),
+        category: normalizeCategoryId(item.category),
+        id: preferredId || item.catalogId || `catalog-${Date.now()}-${catalog.length}`
+      };
+      catalog.push(product);
+      return product;
+    };
 
-      // Produtos antigos da lista mestra permanecem como sugestões/catalogo.
-      // Eles só entram na lista ativa quando o usuário os escolhe.
+    productCatalog.forEach(item => addCatalogProduct(item, item.id));
+    masterList.forEach(item => addCatalogProduct(item, `catalog-legacy-${item.id || Date.now()}-${catalog.length}`));
+    shoppingList.forEach(item => addCatalogProduct(item, item.catalogId));
+    history.forEach(item => addCatalogProduct(item, item.catalogId || `catalog-history-${item.id || Date.now()}-${catalog.length}`));
+
+    const unified = shoppingList.map(item => {
+      const product = findCatalog(item) || addCatalogProduct(item, item.catalogId);
+      return { ...item, catalogId: product.id, category: normalizeCategoryId(item.category || product.category) };
     });
 
     await saveProductCatalog(catalog);
@@ -322,18 +361,33 @@ export const migrateToUnifiedList = async () => {
   }
 };
 
+export const startNewShoppingRound = async () => {
+  try {
+    // A rodada ativa é temporária. O catálogo permanente e o histórico ficam intactos.
+    await saveShoppingList([]);
+    return true;
+  } catch (error) {
+    console.error('Erro ao iniciar nova rodada:', error);
+    return false;
+  }
+};
+
 export const unmarkAsPurchased = async (id) => {
   try {
     const current = await getShoppingList();
+    const currentItem = current.find(item => item.id === id);
     const updated = current.map(item => item.id === id
-      ? { ...item, status: 'pending', purchaseDate: null }
+      ? { ...item, status: 'pending', purchaseDate: null, purchaseId: null, price: null, originalPrice: null }
       : item
     );
     const saved = await saveShoppingList(updated);
     if (!saved) return false;
 
     const history = await getPurchaseHistory();
-    await savePurchaseHistory(history.filter(item => item.shoppingItemId !== id));
+    const historyWithoutCurrentRound = currentItem?.purchaseId
+      ? history.filter(item => item.purchaseId !== currentItem.purchaseId)
+      : history.filter(item => item.shoppingItemId !== id);
+    await savePurchaseHistory(historyWithoutCurrentRound);
     return true;
   } catch (error) {
     console.error('Erro ao desmarcar compra:', error);
@@ -356,11 +410,14 @@ export const removeFromShoppingList = async (id) => {
 export const updatePurchaseHistoryForShoppingItem = async (shoppingItemId, updates) => {
   try {
     const current = await getPurchaseHistory();
-    const updated = current.map(item =>
-      item.shoppingItemId === shoppingItemId
+    const updated = current.map(item => {
+      const matchesCurrentPurchase = updates.purchaseId
+        ? item.purchaseId === updates.purchaseId
+        : item.shoppingItemId === shoppingItemId;
+      return matchesCurrentPurchase
         ? { ...item, ...updates, category: normalizeCategoryId(updates.category ?? item.category) }
-        : item
-    );
+        : item;
+    });
     await savePurchaseHistory(updated);
     return true;
   } catch (error) {
@@ -373,12 +430,14 @@ export const markAsPurchased = async (id, purchaseData) => {
   try {
     const current = await getShoppingList();
     const purchaseDate = new Date().toISOString();
+    const purchaseId = `${id}-${Date.now()}`;
     const updated = current.map(item => {
       if (item.id === id) {
         return {
           ...item,
           status: 'purchased',
           purchaseDate,
+          purchaseId,
           priceMode: purchaseData.priceMode || item.priceMode || 'total',
           priceIsTotal: purchaseData.priceIsTotal ?? item.priceIsTotal ?? true,
           ...purchaseData
@@ -394,6 +453,7 @@ export const markAsPurchased = async (id, purchaseData) => {
       await addToPurchaseHistory({
         ...purchasedItem,
         shoppingItemId: id,
+        purchaseId,
         purchaseDate,
         priceIsTotal: true,
         ...purchaseData
@@ -451,9 +511,9 @@ export const updatePurchaseHistoryItem = async (id, updates) => {
     const saved = await savePurchaseHistory(updated);
     if (!saved) return false;
 
-    if (existing?.shoppingItemId && updates.purchaseDate) {
+    if (existing?.shoppingItemId && existing?.purchaseId && updates.purchaseDate) {
       const shoppingList = await getShoppingList();
-      await saveShoppingList(shoppingList.map(item => item.id === existing.shoppingItemId
+      await saveShoppingList(shoppingList.map(item => item.id === existing.shoppingItemId && item.purchaseId === existing.purchaseId
         ? { ...item, purchaseDate: updates.purchaseDate }
         : item
       ));

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, A
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getShoppingList, addToShoppingList, updateShoppingItem, removeFromShoppingList, markAsPurchased, unmarkAsPurchased, migrateToUnifiedList, searchSuggestions, getPurchaseDefaults, getDefaultPriceUnit, getItemTotal, CATEGORIES, UNITS, WEIGHT_VOLUME_UNITS } from '../utils/storage';
+import { getShoppingList, getProductCatalog, addToShoppingList, updateShoppingItem, updateProductCatalogItem, removeFromShoppingList, startNewShoppingRound, markAsPurchased, unmarkAsPurchased, migrateToUnifiedList, searchSuggestions, getPurchaseDefaults, getDefaultPriceUnit, getItemTotal, getProductKey, CATEGORIES, UNITS, WEIGHT_VOLUME_UNITS } from '../utils/storage';
 
 const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
 const parseMoneyDigits = (digits) => digits ? Number(digits) / 100 : null;
@@ -21,12 +21,14 @@ const parseQuantity = (value) => Number.parseFloat(String(value || '').replace('
 export default function ShoppingListScreen() {
   const insets = useSafeAreaInsets();
   const [shoppingList, setShoppingList] = useState([]);
+  const [productCatalog, setProductCatalog] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [newItem, setNewItem] = useState({ name: '', brand: '', category: 'outros' });
+  const [catalogEditId, setCatalogEditId] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
@@ -42,7 +44,9 @@ export default function ShoppingListScreen() {
 
   const loadList = useCallback(async () => {
     const list = await migrateToUnifiedList();
+    const catalog = await getProductCatalog();
     setShoppingList(list);
+    setProductCatalog(catalog);
   }, []);
 
   useFocusEffect(
@@ -52,6 +56,7 @@ export default function ShoppingListScreen() {
   );
 
   const handleOpenAddItem = (initialName = '') => {
+    setCatalogEditId(null);
     setNewItem({ name: initialName, brand: '', category: 'outros' });
     setSearchQuery(initialName);
     setSuggestions([]);
@@ -72,10 +77,15 @@ export default function ShoppingListScreen() {
     const added = await addToShoppingList({
       name: suggestion.name,
       brand: suggestion.brand || '',
-      category: suggestion.category || 'outros'
+      category: suggestion.category || 'outros',
+      catalogId: suggestion.source === 'catalog' ? suggestion.id : undefined
     });
     if (!added) {
       Alert.alert('Erro', 'Não foi possível adicionar o produto. Tente novamente.');
+      return;
+    }
+    if (added.status === 'purchased') {
+      Alert.alert('Já comprado nesta rodada', 'Para comprar novamente, toque em “Nova compra” e depois adicione o produto pela lista geral.');
       return;
     }
     setMainSearchQuery('');
@@ -90,6 +100,27 @@ export default function ShoppingListScreen() {
       return;
     }
 
+    if (catalogEditId) {
+      const saved = await updateProductCatalogItem(catalogEditId, {
+        name,
+        brand: newItem.brand.trim(),
+        category: newItem.category
+      });
+      if (!saved) {
+        Alert.alert('Erro', 'Não foi possível editar o produto. Tente novamente.');
+        return;
+      }
+      const activeItem = shoppingList.find(item => item.catalogId === catalogEditId);
+      if (activeItem) {
+        await updateShoppingItem(activeItem.id, { name, brand: newItem.brand.trim(), category: newItem.category });
+      }
+      setCatalogEditId(null);
+      setNewItem({ name: '', brand: '', category: 'outros' });
+      setModalVisible(false);
+      loadList();
+      return;
+    }
+
     const addedItem = await addToShoppingList({
       name,
       brand: newItem.brand.trim(),
@@ -98,6 +129,10 @@ export default function ShoppingListScreen() {
 
     if (!addedItem) {
       Alert.alert('Erro', 'Não foi possível adicionar o produto. Tente novamente.');
+      return;
+    }
+    if (addedItem.status === 'purchased') {
+      Alert.alert('Já comprado nesta rodada', 'Para comprar novamente, toque em “Nova compra” e depois adicione o produto pela lista geral.');
       return;
     }
 
@@ -129,6 +164,12 @@ export default function ShoppingListScreen() {
     } else {
       setSuggestions([]);
     }
+  };
+
+  const handleOpenCatalogEdit = (item) => {
+    setCatalogEditId(item.id);
+    setNewItem({ name: item.name || '', brand: item.brand || '', category: item.category || 'outros' });
+    setModalVisible(true);
   };
 
   const handleOpenEditItem = (item) => {
@@ -309,7 +350,7 @@ export default function ShoppingListScreen() {
   };
 
   const handleDelete = async (id) => {
-    Alert.alert('Confirmar', 'Remover este item?', [
+    Alert.alert('Confirmar', 'Remover este item da compra atual?', [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Remover', style: 'destructive', onPress: async () => {
         await removeFromShoppingList(id);
@@ -318,74 +359,115 @@ export default function ShoppingListScreen() {
     ]);
   };
 
+  const getActiveItemForCatalog = (product) => shoppingList.find(item =>
+    (product.id && item.catalogId === product.id) || getProductKey(item) === getProductKey(product)
+  );
+
+  const handleCatalogRoundToggle = async (product) => {
+    const activeItem = getActiveItemForCatalog(product);
+    if (activeItem) {
+      await handleTogglePurchased(activeItem);
+      return;
+    }
+
+    const added = await addToShoppingList({
+      name: product.name,
+      brand: product.brand || '',
+      category: product.category || 'outros',
+      catalogId: product.id
+    });
+    if (!added) {
+      Alert.alert('Erro', 'Não foi possível adicionar o produto à compra atual.');
+      return;
+    }
+    loadList();
+  };
+
+  const handleStartNewRound = () => {
+    Alert.alert(
+      'Nova compra',
+      'Os produtos da compra atual ficarão fora da nova rodada, mas continuarão visíveis na lista geral. O Histórico não será apagado.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Começar',
+          onPress: async () => {
+            const started = await startNewShoppingRound();
+            if (!started) {
+              Alert.alert('Erro', 'Não foi possível iniciar uma nova compra.');
+              return;
+            }
+            loadList();
+          }
+        }
+      ]
+    );
+  };
+
   const calculateTotal = () => shoppingList
     .filter(item => item.status === 'purchased')
     .reduce((total, item) => total + getItemTotal(item), 0);
 
   const categoryOrder = CATEGORIES.reduce((order, category, index) => ({ ...order, [category.id]: index }), {});
-  const filteredItems = [...(selectedCategory
-    ? shoppingList.filter(item => item.category === selectedCategory)
-    : shoppingList)].sort((first, second) => {
+  const filteredCatalog = [...(selectedCategory
+    ? productCatalog.filter(item => item.category === selectedCategory)
+    : productCatalog)].sort((first, second) => {
       const categoryDifference = (categoryOrder[first.category] ?? 999) - (categoryOrder[second.category] ?? 999);
       return categoryDifference || String(first.name || '').localeCompare(String(second.name || ''), 'pt-BR');
     });
-  const pendingItems = filteredItems.filter(item => item.status === 'pending');
-  const purchasedItems = filteredItems.filter(item => item.status === 'purchased');
+  const purchasedItems = shoppingList.filter(item => item.status === 'purchased');
+  const pendingRoundCount = shoppingList.filter(item => item.status !== 'purchased').length;
 
-  const renderItem = ({ item }) => {
+  const renderCatalogItem = ({ item }) => {
     const category = CATEGORIES.find(c => c.id === item.category);
-    const total = getItemTotal(item);
+    const activeItem = getActiveItemForCatalog(item);
+    const isPurchased = activeItem?.status === 'purchased';
+    const isInRound = Boolean(activeItem);
+    const total = activeItem ? getItemTotal(activeItem) : 0;
 
     return (
-      <View style={[styles.itemCard, item.status === 'purchased' && styles.itemPurchased]}>
+      <View style={[styles.itemCard, isPurchased && styles.itemPurchased]}>
         <TouchableOpacity
-          accessibilityLabel={`Editar ${item.name}`}
+          accessibilityLabel={activeItem ? `Editar compra de ${item.name}` : `Editar produto ${item.name}`}
           style={styles.itemLeft}
-          onPress={() => handleOpenEditItem(item)}
+          onPress={() => activeItem ? handleOpenEditItem(activeItem) : handleOpenCatalogEdit(item)}
         >
           <View style={[styles.itemIcon, { backgroundColor: category?.color || '#9E9E9E' }]}>
             <MaterialCommunityIcons name={category?.icon || 'shape-outline'} size={20} color="#fff" />
           </View>
           <View style={styles.itemInfo}>
-            <Text style={[styles.itemName, item.status === 'purchased' && styles.itemTextPurchased]}>
-              {item.name}
+            <Text style={[styles.itemName, isPurchased && styles.itemTextPurchased]}>{item.name}</Text>
+            {item.brand ? <Text style={[styles.itemBrand, isPurchased && styles.itemTextPurchased]}>{item.brand}</Text> : null}
+            <Text style={styles.itemCategory}>{category?.name || 'Outros'}</Text>
+            <Text style={[styles.catalogStatus, isPurchased && styles.catalogStatusPurchased]}>
+              {isPurchased ? 'Comprado nesta compra' : isInRound ? 'A comprar nesta compra' : 'Fora da compra atual'}
             </Text>
-            {item.brand ? (
-              <Text style={[styles.itemBrand, item.status === 'purchased' && styles.itemTextPurchased]}>
-                {item.brand}
+            {isPurchased && activeItem.price !== null && activeItem.price !== undefined ? (
+              <Text style={styles.itemPrice}>
+                {activeItem.priceMode === 'unit' ? `Total estimado: R$ ${total.toFixed(2).replace('.', ',')}` : `R$ ${total.toFixed(2).replace('.', ',')}`}
               </Text>
             ) : null}
-            <Text style={styles.itemCategory}>{category?.name || 'Outros'}</Text>
-            <Text style={styles.itemQuantity}>{item.quantity || 1} {item.unit || 'un'}</Text>
-            {item.price !== null && item.price !== undefined ? (
-              <>
-                {item.priceMode === 'unit' && (
-                  <Text style={styles.itemReferencePrice}>R$ {Number(item.price).toFixed(2).replace('.', ',')} / {item.priceUnit || item.unit || 'un'}</Text>
-                )}
-                <Text style={styles.itemPrice}>
-                  {item.priceMode === 'unit' ? `Total estimado: R$ ${total.toFixed(2).replace('.', ',')}` : `R$ ${total.toFixed(2).replace('.', ',')}`}
-                  {item.isPromotion && <Text style={styles.promotionBadge}> PROMO</Text>}
-                </Text>
-              </>
-            ) : (
-              <Text style={styles.itemPendingPrice}>Preço a informar no caixa</Text>
-            )}
           </View>
         </TouchableOpacity>
         <View style={styles.itemActions}>
           <TouchableOpacity
-            accessibilityLabel={item.status === 'pending' ? `Marcar ${item.name} como comprado` : `Desmarcar ${item.name} como comprado`}
-            style={[styles.checkButton, item.status === 'purchased' && styles.checkButtonActive]}
-            onPress={() => handleTogglePurchased(item)}
+            accessibilityLabel={isPurchased ? `Desmarcar ${item.name} como comprado` : isInRound ? `Marcar ${item.name} como comprado` : `Adicionar ${item.name} à compra atual`}
+            style={[styles.catalogCheckButton, isPurchased && styles.catalogCheckButtonActive]}
+            onPress={() => handleCatalogRoundToggle(item)}
           >
             <Ionicons
-              name={item.status === 'purchased' ? 'checkmark' : 'checkmark-outline'}
+              name={isPurchased ? 'checkmark' : isInRound ? 'checkmark-outline' : 'add'}
               size={22}
-              color={item.status === 'purchased' ? '#fff' : '#4CAF50'}
+              color={isPurchased ? '#fff' : '#4CAF50'}
             />
           </TouchableOpacity>
-          <TouchableOpacity accessibilityLabel={`Remover ${item.name}`} onPress={() => handleDelete(item.id)}>
-            <Ionicons name="trash-outline" size={20} color="#F44336" />
+          {activeItem?.status === 'pending' && (
+            <TouchableOpacity accessibilityLabel={`Retirar ${item.name} da compra atual`} onPress={() => handleDelete(activeItem.id)}>
+              <Ionicons name="remove-circle-outline" size={20} color="#FFB74D" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity accessibilityLabel={`Editar produto ${item.name}`} onPress={() => handleOpenCatalogEdit(item)}>
+            <Ionicons name="create-outline" size={20} color="#4CAF50" />
           </TouchableOpacity>
         </View>
       </View>
@@ -397,8 +479,8 @@ export default function ShoppingListScreen() {
       {/* Barra fixa: fica abaixo do relógio, bateria e demais ícones do sistema. */}
       <View style={styles.header}>
         <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle}>Minha Lista</Text>
-          <Text style={styles.headerSubtitle}>Marque o que você já comprou</Text>
+          <Text style={styles.headerTitle}>Lista de compras</Text>
+          <Text style={styles.headerSubtitle}>Veja seus produtos e marque o que precisa comprar</Text>
         </View>
         <View style={styles.headerActions}>
           <View style={styles.totalContainer}>
@@ -457,10 +539,31 @@ export default function ShoppingListScreen() {
         )}
       </View>
 
+      <View style={styles.roundSummary}>
+        <View style={styles.roundSummaryCopy}>
+          <Text style={styles.roundSummaryTitle}>Compra atual</Text>
+          <Text style={styles.roundSummaryText}>{pendingRoundCount} a comprar • {purchasedItems.length} comprados</Text>
+        </View>
+        {purchasedItems.length > 0 && (
+          <TouchableOpacity style={styles.newRoundButton} onPress={handleStartNewRound}>
+            <Ionicons name="refresh-outline" size={17} color="#fff" />
+            <Text style={styles.newRoundButtonText}>Nova compra</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.catalogHeader}>
+        <View>
+          <Text style={styles.sectionTitle}>Todos os produtos</Text>
+          <Text style={styles.catalogHelper}>Marque o check para colocar na compra atual.</Text>
+        </View>
+        <Text style={styles.catalogCount}>{filteredCatalog.length}</Text>
+      </View>
+
       <View style={styles.filterSection}>
-        <Text style={styles.filterLabel}>Organizar por setor</Text>
+        <Text style={styles.filterLabel}>Filtrar produtos por setor</Text>
         <TouchableOpacity style={styles.categoryField} onPress={() => openCategoryPicker('filter')}>
-          <Ionicons name="search-outline" size={20} color="#4CAF50" />
+          <Ionicons name="funnel-outline" size={20} color="#4CAF50" />
           <Text style={styles.categoryFieldText}>
             {selectedCategory ? CATEGORIES.find(category => category.id === selectedCategory)?.name : 'Todos os setores'}
           </Text>
@@ -468,46 +571,18 @@ export default function ShoppingListScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Lista Pendentes */}
-      {pendingItems.length > 0 && (
-        <View style={styles.section}>
-                      <Text style={styles.sectionTitle}>A comprar ({pendingItems.length})</Text>
-
-          <FlatList
-            data={pendingItems}
-            renderItem={renderItem}
-            keyExtractor={item => item.id}
-            scrollEnabled={false}
-          />
-        </View>
-      )}
-
-      {/* Lista Comprados */}
-      {purchasedItems.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Comprados ({purchasedItems.length})</Text>
-          <FlatList
-            data={purchasedItems}
-            renderItem={renderItem}
-            keyExtractor={item => item.id}
-            scrollEnabled={false}
-          />
-        </View>
-      )}
-
-      {shoppingList.length === 0 && (
+      {filteredCatalog.length > 0 ? (
+        <FlatList
+          data={filteredCatalog}
+          renderItem={renderCatalogItem}
+          keyExtractor={item => item.id}
+          scrollEnabled={false}
+        />
+      ) : (
         <View style={styles.emptyContainer}>
-          <Ionicons name="cart-outline" size={64} color="#8888aa" />
-          <Text style={styles.emptyText}>Sua lista está vazia</Text>
-          <Text style={styles.emptySubtext}>Adicione itens para começar</Text>
-        </View>
-      )}
-
-      {shoppingList.length > 0 && filteredItems.length === 0 && (
-        <View style={styles.filteredEmptyContainer}>
-          <Ionicons name="filter-outline" size={40} color="#8888aa" />
-          <Text style={styles.emptyText}>Nenhum item neste setor</Text>
-          <Text style={styles.emptySubtext}>Escolha outro setor para ver os produtos.</Text>
+          <Ionicons name="list-outline" size={64} color="#8888aa" />
+          <Text style={styles.emptyText}>Sua lista geral está vazia</Text>
+          <Text style={styles.emptySubtext}>Use a busca ou o botão + para cadastrar os produtos que você compra normalmente.</Text>
         </View>
       )}
 
@@ -522,7 +597,7 @@ export default function ShoppingListScreen() {
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
-                Alert.alert('Como usar', 'Adicione produtos pela busca, toque em um item para editar e marque o check quando terminar a compra. Produtos já cadastrados aparecem como sugestões para evitar duplicatas.');
+                Alert.alert('Como usar', 'Esta tela mostra todos os produtos que você costuma comprar. Toque no check para colocar um produto na compra atual. O Histórico guarda as compras anteriores e a opção “Nova compra” limpa apenas os checks e preços da rodada atual.');
               }}
             >
               <Ionicons name="help-circle-outline" size={22} color="#4CAF50" />
@@ -552,7 +627,7 @@ export default function ShoppingListScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.formModalContent}>
             <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.modalTitle}>Adicionar à Lista</Text>
+            <Text style={styles.modalTitle}>{catalogEditId ? 'Editar produto da lista geral' : 'Adicionar produto'}</Text>
             
             <TextInput
               style={styles.input}
@@ -592,7 +667,7 @@ export default function ShoppingListScreen() {
                 <Text style={styles.cancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={handleAddItem}>
-                <Text style={styles.saveButtonText}>Salvar</Text>
+                <Text style={styles.saveButtonText}>{catalogEditId ? 'Salvar produto' : 'Adicionar produto'}</Text>
               </TouchableOpacity>
             </View>
             </ScrollView>
@@ -861,6 +936,15 @@ const styles = StyleSheet.create({
   mainSuggestionCopy: { flex: 1 },
   newProductSuggestion: { flexDirection: 'row', alignItems: 'center', padding: 14 },
   newProductSuggestionText: { color: '#FFB74D', fontSize: 15, fontWeight: '600', marginLeft: 10 },
+  roundSummary: { marginHorizontal: 16, marginTop: 14, marginBottom: 16, padding: 14, borderRadius: 12, backgroundColor: '#1d4c30', flexDirection: 'row', alignItems: 'center' },
+  roundSummaryCopy: { flex: 1 },
+  roundSummaryTitle: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
+  roundSummaryText: { color: '#c9e9cf', fontSize: 12, marginTop: 3 },
+  newRoundButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4CAF50', paddingVertical: 9, paddingHorizontal: 11, borderRadius: 9 },
+  newRoundButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
+  catalogHeader: { paddingHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  catalogHelper: { color: '#8888aa', fontSize: 12, marginTop: 3 },
+  catalogCount: { color: '#4CAF50', fontSize: 16, fontWeight: 'bold', backgroundColor: '#1d4c30', minWidth: 30, textAlign: 'center', paddingVertical: 5, borderRadius: 14 },
   section: { paddingHorizontal: 16, marginBottom: 16 },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
   filterSection: { marginBottom: 12 },
@@ -883,6 +967,8 @@ const styles = StyleSheet.create({
   itemName: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   itemBrand: { color: '#8888aa', fontSize: 14 },
   itemCategory: { color: '#8888aa', fontSize: 12, marginTop: 2 },
+  catalogStatus: { color: '#FFB74D', fontSize: 12, marginTop: 4, fontWeight: '600' },
+  catalogStatusPurchased: { color: '#81C784' },
   itemQuantity: { color: '#c0c0d0', fontSize: 12, marginTop: 2 },
   itemReferencePrice: { color: '#b9c7bd', fontSize: 12, marginTop: 4 },
   itemPrice: { color: '#4CAF50', fontSize: 14, fontWeight: 'bold', marginTop: 2 },
@@ -892,6 +978,8 @@ const styles = StyleSheet.create({
   itemActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   checkButton: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', marginRight: 4 },
   checkButtonActive: { backgroundColor: '#4CAF50' },
+  catalogCheckButton: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', marginRight: 4 },
+  catalogCheckButtonActive: { backgroundColor: '#4CAF50' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: '#fff', fontSize: 18, marginTop: 16 },
   emptySubtext: { color: '#8888aa', fontSize: 14, marginTop: 8, textAlign: 'center' },
