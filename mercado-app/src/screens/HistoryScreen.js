@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert, TextInput } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { getPurchaseHistory, removeFromPurchaseHistory, updatePurchaseHistoryItem, getItemTotal, CATEGORIES } from '../utils/storage';
+import { getPurchaseHistory, removeFromPurchaseHistory, updatePurchaseHistoryItem, updatePurchaseHistoryItems, getItemTotal, CATEGORIES } from '../utils/storage';
 
 export default function HistoryScreen() {
   const [history, setHistory] = useState([]);
@@ -10,6 +10,7 @@ export default function HistoryScreen() {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [expandedGroups, setExpandedGroups] = useState({});
   
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -47,12 +48,16 @@ export default function HistoryScreen() {
     setFilteredHistory(filtered);
   };
 
-  const handleOpenEdit = (item) => {
-    const date = new Date(item.purchaseDate);
+  const handleOpenEdit = (entry) => {
+    const firstItem = entry.items?.[0] || entry;
+    const date = new Date(firstItem.purchaseDate);
     const dateText = Number.isNaN(date.getTime())
       ? ''
       : date.toLocaleDateString('pt-BR');
-    setEditingItem({ id: item.id, purchaseDate: dateText });
+    setEditingItem({
+      ids: entry.items?.map(item => item.id) || [entry.id],
+      purchaseDate: dateText
+    });
     setEditModalVisible(true);
   };
 
@@ -72,7 +77,10 @@ export default function HistoryScreen() {
     }
 
     const purchaseDate = parsedDate.toISOString();
-    const saved = await updatePurchaseHistoryItem(editingItem.id, { purchaseDate });
+    const ids = editingItem?.ids || (editingItem?.id ? [editingItem.id] : []);
+    const saved = ids.length > 1
+      ? await updatePurchaseHistoryItems(ids, { purchaseDate })
+      : await updatePurchaseHistoryItem(ids[0], { purchaseDate });
     if (!saved) {
       Alert.alert('Erro', 'Não foi possível atualizar a data da compra.');
       return;
@@ -116,73 +124,79 @@ export default function HistoryScreen() {
 
   const getTotalFiltered = () => filteredHistory.reduce((sum, item) => sum + getItemTotal(item), 0);
 
-  const renderCategoryBadge = (category) => {
-    const catConfig = CATEGORIES.find(c => c.id === category) || CATEGORIES[0];
-    return (
-      <View style={[styles.badge, { backgroundColor: catConfig.color + '30' }]}>
-        <MaterialCommunityIcons name={catConfig.icon} size={12} color={catConfig.color} />
-        <Text style={[styles.badgeText, { color: catConfig.color }]}>{catConfig.name}</Text>
-      </View>
-    );
+  const getGroupDateLabel = (purchaseDate) => {
+    const date = new Date(purchaseDate);
+    return Number.isNaN(date.getTime()) ? 'Data não informada' : date.toLocaleDateString('pt-BR');
   };
 
-  const renderItem = ({ item }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.cardTitleContainer}>
-          <Text style={styles.cardTitle}>{item.name}</Text>
-          {item.brand && <Text style={styles.cardBrand}>{item.brand}</Text>}
-          {item.isPromotion && (
-            <View style={styles.promoTag}>
-              <Text style={styles.promoText}>PROMO</Text>
-            </View>
-          )}
-        </View>
-        <View style={styles.cardActions}>
-          <TouchableOpacity accessibilityLabel={`Editar data de ${item.name}`} onPress={() => handleOpenEdit(item)}>
-            <Ionicons name="create-outline" size={20} color="#4CAF50" />
-          </TouchableOpacity>
-          <TouchableOpacity accessibilityLabel={`Remover ${item.name} do histórico`} onPress={() => handleDelete(item.id)}>
-            <Ionicons name="trash-outline" size={20} color="#ff4444" />
-          </TouchableOpacity>
-        </View>
+  const groupedHistory = Object.values(filteredHistory.reduce((groups, item) => {
+    const date = new Date(item.purchaseDate);
+    const dateKey = Number.isNaN(date.getTime()) ? 'unknown-date' : date.toISOString().slice(0, 10);
+    const marketName = item.marketName || item.storeName || 'Mercado não informado';
+    const key = `${dateKey}|${marketName}`;
+    if (!groups[key]) {
+      groups[key] = { key, date: item.purchaseDate, marketName, items: [] };
+    }
+    groups[key].items.push(item);
+    return groups;
+  }, {})).sort((first, second) => new Date(second.date) - new Date(first.date));
+
+  const toggleGroup = (key) => {
+    setExpandedGroups(current => ({ ...current, [key]: !current[key] }));
+  };
+
+  const renderHistoryItem = (item) => (
+    <View key={item.id} style={styles.detailRow}>
+      <View style={styles.detailCopy}>
+        <Text style={styles.detailName}>{item.name}</Text>
+        <Text style={styles.detailMeta}>
+          {item.brand ? `${item.brand} · ` : ''}{item.quantity || '—'} {item.unit || ''}
+          {item.isPromotion ? ' · Promoção' : ''}
+        </Text>
       </View>
-
-      <View style={styles.cardBody}>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Valor total:</Text>
-          <Text style={styles.infoValue}>
-            {item.price !== null && item.price !== undefined
-              ? `R$ ${getItemTotal(item).toFixed(2).replace('.', ',')}`
-              : 'A informar'}
-          </Text>
-        </View>
-        
-        {item.originalPrice !== null && item.originalPrice !== undefined && item.isPromotion && item.price !== null && item.price !== undefined && (
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>De: R$ {getItemTotal({ ...item, price: item.originalPrice }).toFixed(2).replace('.', ',')}</Text>
-            <Text style={[styles.infoValue, { color: '#4CAF50' }]}>
-              Economia: R$ {(getItemTotal({ ...item, price: item.originalPrice }) - getItemTotal(item)).toFixed(2).replace('.', ',')}
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Qtd:</Text>
-          <Text style={styles.infoValue}>{item.quantity} {item.unit}</Text>
-        </View>
-
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Data:</Text>
-          <Text style={styles.infoValue}>
-            {new Date(item.purchaseDate).toLocaleDateString('pt-BR')}
-          </Text>
-        </View>
-
-        {renderCategoryBadge(item.category)}
+      <Text style={styles.detailValue}>
+        {item.price !== null && item.price !== undefined
+          ? `R$ ${getItemTotal(item).toFixed(2).replace('.', ',')}`
+          : 'A informar'}
+      </Text>
+      <View style={styles.detailActions}>
+        <TouchableOpacity accessibilityLabel={`Editar data de ${item.name}`} onPress={() => handleOpenEdit({ items: [item] })}>
+          <Ionicons name="create-outline" size={18} color="#4CAF50" />
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityLabel={`Remover ${item.name} do histórico`} onPress={() => handleDelete(item.id)}>
+          <Ionicons name="trash-outline" size={18} color="#ff6666" />
+        </TouchableOpacity>
       </View>
     </View>
   );
+
+  const renderHistoryGroup = ({ item: group }) => {
+    const expanded = Boolean(expandedGroups[group.key]);
+    const groupTotal = group.items.reduce((sum, historyItem) => sum + getItemTotal(historyItem), 0);
+    return (
+      <View style={styles.groupCard}>
+        <TouchableOpacity
+          style={styles.groupHeader}
+          onPress={() => toggleGroup(group.key)}
+          accessibilityLabel={`${expanded ? 'Recolher' : 'Abrir'} compra de ${getGroupDateLabel(group.date)} no ${group.marketName}`}
+          accessibilityState={{ expanded }}
+        >
+          <View style={styles.groupCopy}>
+            <Text style={styles.groupDate}>{getGroupDateLabel(group.date)}</Text>
+            <Text style={styles.groupMarket}>{group.marketName}</Text>
+            <Text style={styles.groupSummary}>{group.items.length} {group.items.length === 1 ? 'item' : 'itens'} · R$ {groupTotal.toFixed(2).replace('.', ',')}</Text>
+          </View>
+          <View style={styles.groupActions}>
+            <TouchableOpacity accessibilityLabel={`Editar data da compra de ${getGroupDateLabel(group.date)}`} onPress={() => handleOpenEdit(group)}>
+              <Ionicons name="create-outline" size={19} color="#4CAF50" />
+            </TouchableOpacity>
+            <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={21} color="#aaaac0" />
+          </View>
+        </TouchableOpacity>
+        {expanded && <View style={styles.groupDetails}>{group.items.map(renderHistoryItem)}</View>}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -205,21 +219,21 @@ export default function HistoryScreen() {
           {selectedCategory ? ` • ${CATEGORIES.find(c => c.id === selectedCategory)?.name}` : ''}
         </Text>
         <Text style={styles.totalText}>
-          Total: R$ {getTotalFiltered().toFixed(2)}
+          Total: R$ {getTotalFiltered().toFixed(2).replace('.', ',')}
         </Text>
       </View>
 
-      {/* Lista */}
-      {filteredHistory.length === 0 ? (
+      {/* Lista agrupada por data e mercado */}
+      {groupedHistory.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="receipt-outline" size={60} color="#333" />
           <Text style={styles.emptyText}>Nenhuma compra neste período</Text>
         </View>
       ) : (
         <FlatList
-          data={filteredHistory}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={renderItem}
+          data={groupedHistory}
+          keyExtractor={(item) => item.key}
+          renderItem={renderHistoryGroup}
           contentContainerStyle={styles.listContent}
         />
       )}
@@ -367,7 +381,21 @@ const styles = StyleSheet.create({
   },
   summaryText: { color: '#aaa', fontSize: 14 },
   totalText: { color: '#4CAF50', fontWeight: 'bold', fontSize: 16 },
-  listContent: { padding: 15 },
+  listContent: { padding: 12 },
+  groupCard: { backgroundColor: '#1a1a2e', borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#2a2a4e', overflow: 'hidden' },
+  groupHeader: { minHeight: 76, paddingVertical: 11, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  groupCopy: { flex: 1, paddingRight: 10 },
+  groupDate: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
+  groupMarket: { color: '#4CAF50', fontSize: 13, fontWeight: '600', marginTop: 2 },
+  groupSummary: { color: '#8888aa', fontSize: 12, marginTop: 3 },
+  groupActions: { flexDirection: 'row', alignItems: 'center', gap: 13 },
+  groupDetails: { borderTopWidth: 1, borderTopColor: '#2a2a4e', paddingHorizontal: 13 },
+  detailRow: { minHeight: 56, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#25253b' },
+  detailCopy: { flex: 1, paddingRight: 8 },
+  detailName: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  detailMeta: { color: '#8888aa', fontSize: 11, marginTop: 2 },
+  detailValue: { color: '#fff', fontSize: 13, fontWeight: '600', minWidth: 68, textAlign: 'right' },
+  detailActions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginLeft: 10 },
   card: {
     backgroundColor: '#1a1a2e',
     borderRadius: 12,

@@ -36,7 +36,7 @@ export default function ShoppingListScreen() {
   const [suggestions, setSuggestions] = useState([]);
   const [mainSearchQuery, setMainSearchQuery] = useState('');
   const [mainSuggestions, setMainSuggestions] = useState([]);
-  const [purchaseData, setPurchaseData] = useState({ priceDigits: '', quantity: '', unit: 'un', priceMode: 'total', isPromotion: false, originalPriceDigits: '' });
+  const [purchaseData, setPurchaseData] = useState({ priceDigits: '', quantity: '', unit: 'un', priceMode: 'total', isPromotion: false, originalPriceDigits: '', marketName: '' });
   const [unitModalVisible, setUnitModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
@@ -292,7 +292,8 @@ export default function ShoppingListScreen() {
       priceMode,
       priceUnit: item.priceUnit || getDefaultPriceUnit(unit),
       isPromotion: Boolean(item.isPromotion),
-      originalPriceDigits: moneyDigitsFromValue(item.originalPrice)
+      originalPriceDigits: moneyDigitsFromValue(item.originalPrice),
+      marketName: item.marketName || purchaseData.marketName || ''
     });
     setPurchaseModalVisible(true);
   };
@@ -317,7 +318,8 @@ export default function ShoppingListScreen() {
       quantity: quantity || null,
       unit: purchaseData.unit,
       isPromotion: purchaseData.isPromotion,
-      originalPrice: purchaseData.isPromotion ? parseMoneyDigits(purchaseData.originalPriceDigits) : null
+      originalPrice: purchaseData.isPromotion ? parseMoneyDigits(purchaseData.originalPriceDigits) : null,
+      marketName: purchaseData.marketName?.trim() || null
     });
 
     if (!purchased) {
@@ -857,6 +859,16 @@ export default function ShoppingListScreen() {
             <Text style={styles.modalTitle}>Registrar Compra</Text>
             <Text style={styles.purchaseProductName}>{selectedItem?.name}</Text>
             {selectedItem?.brand ? <Text style={styles.purchaseProductBrand}>{selectedItem.brand}</Text> : null}
+
+            <Text style={styles.label}>Mercado (opcional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Ex.: Bistek, Giassi, feira..."
+              placeholderTextColor="#8888aa"
+              value={purchaseData.marketName}
+              onChangeText={(marketName) => setPurchaseData({ ...purchaseData, marketName })}
+            />
+            <Text style={styles.helperText}>O nome será usado para organizar o Histórico. Ele será reaproveitado no próximo item desta compra.</Text>
             
             <Text style={styles.label}>{purchaseData.priceMode === 'unit' ? `Preço por ${purchaseData.priceUnit || purchaseData.unit}` : 'Valor total pago'}</Text>
             <TextInput

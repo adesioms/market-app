@@ -538,6 +538,32 @@ export const updatePurchaseHistoryItem = async (id, updates) => {
   }
 };
 
+export const updatePurchaseHistoryItems = async (ids, updates) => {
+  try {
+    const idSet = new Set(ids || []);
+    if (!idSet.size) return false;
+    const current = await getPurchaseHistory();
+    const updated = current.map(item => idSet.has(item.id)
+      ? { ...item, ...updates, category: normalizeCategoryId(updates.category ?? item.category) }
+      : item
+    );
+    const saved = await savePurchaseHistory(updated);
+    if (!saved) return false;
+
+    if (updates.purchaseDate) {
+      const shoppingList = await getShoppingList();
+      await saveShoppingList(shoppingList.map(item => {
+        const historyMatch = current.find(historyItem => idSet.has(historyItem.id) && historyItem.shoppingItemId === item.id && historyItem.purchaseId === item.purchaseId);
+        return historyMatch ? { ...item, purchaseDate: updates.purchaseDate } : item;
+      }));
+    }
+    return true;
+  } catch (error) {
+    console.error('Erro ao atualizar compras agrupadas no histórico:', error);
+    return false;
+  }
+};
+
 export const removeFromPurchaseHistory = async (id) => {
   try {
     const current = await getPurchaseHistory();
