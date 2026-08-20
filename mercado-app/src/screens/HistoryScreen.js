@@ -12,6 +12,20 @@ const formatMoneyDigits = (digits) => {
   if (!numeric) return '';
   return (Number(numeric) / 100).toFixed(2).replace('.', ',');
 };
+const quantityScale = (unit) => unit === 'kg' || unit === 'L' ? 1000 : 1;
+const parseQuantityInput = (digits, unit) => {
+  const numeric = Number(onlyDigits(digits));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric / quantityScale(unit) : 0;
+};
+const quantityDigitsFromValue = (value, unit) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? String(Math.round(numeric * quantityScale(unit))) : '';
+};
+const formatQuantityDigits = (digits, unit) => {
+  const numeric = Number(onlyDigits(digits));
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  return quantityScale(unit) === 1000 ? (numeric / 1000).toFixed(3).replace('.', ',') : String(numeric);
+};
 
 export default function HistoryScreen() {
   const [history, setHistory] = useState([]);
@@ -26,7 +40,7 @@ export default function HistoryScreen() {
   const [editingHistoryItem, setEditingHistoryItem] = useState(null);
   const [addItemVisible, setAddItemVisible] = useState(false);
   const [addItemContext, setAddItemContext] = useState(null);
-  const [newHistoryItem, setNewHistoryItem] = useState({ name: '', brand: '', quantity: '', unit: 'un', priceDigits: '', isPromotion: false, originalPriceDigits: '' });
+  const [newHistoryItem, setNewHistoryItem] = useState({ name: '', brand: '', quantityDigits: '', unit: 'un', priceDigits: '', isPromotion: false, originalPriceDigits: '' });
   
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -140,7 +154,7 @@ export default function HistoryScreen() {
       id: item.id,
       name: item.name || '',
       brand: item.brand || '',
-      quantity: item.quantity === null || item.quantity === undefined ? '' : String(item.quantity),
+      quantityDigits: quantityDigitsFromValue(item.quantity, item.unit || 'un'),
       unit: item.unit || 'un',
       priceDigits: moneyDigitsFromValue(item.price),
       priceMode: item.priceMode || 'total',
@@ -157,7 +171,7 @@ export default function HistoryScreen() {
       Alert.alert('Produto inválido', 'Informe o nome do produto.');
       return;
     }
-    const quantity = Number.parseFloat(String(editingHistoryItem.quantity || '').replace(',', '.'));
+    const quantity = parseQuantityInput(editingHistoryItem.quantityDigits, editingHistoryItem.unit);
     const saved = await updatePurchaseHistoryItem(editingHistoryItem.id, {
       name,
       brand: editingHistoryItem.brand?.trim() || '',
@@ -221,7 +235,7 @@ export default function HistoryScreen() {
 
   const handleOpenAddItem = (group) => {
     setAddItemContext(group);
-    setNewHistoryItem({ name: '', brand: '', quantity: '', unit: 'un', priceDigits: '', isPromotion: false, originalPriceDigits: '' });
+    setNewHistoryItem({ name: '', brand: '', quantityDigits: '', unit: 'un', priceDigits: '', isPromotion: false, originalPriceDigits: '' });
     setAddItemVisible(true);
   };
 
@@ -231,7 +245,7 @@ export default function HistoryScreen() {
       Alert.alert('Produto inválido', 'Informe o nome do produto.');
       return;
     }
-    const quantity = Number.parseFloat(String(newHistoryItem.quantity || '').replace(',', '.'));
+    const quantity = parseQuantityInput(newHistoryItem.quantityDigits, newHistoryItem.unit);
     const reference = addItemContext?.items?.[0];
     const saved = await addToPurchaseHistory({
       name,
@@ -558,21 +572,31 @@ export default function HistoryScreen() {
                   style={styles.formInput}
                   placeholder="Ex.: 780"
                   placeholderTextColor="#8888aa"
-                  keyboardType="decimal-pad"
-                  value={editingHistoryItem?.quantity || ''}
-                  onChangeText={(quantity) => setEditingHistoryItem({ ...editingHistoryItem, quantity })}
+                  keyboardType="number-pad"
+                  value={formatQuantityDigits(editingHistoryItem?.quantityDigits, editingHistoryItem?.unit)}
+                  onChangeText={(quantityDigits) => setEditingHistoryItem({ ...editingHistoryItem, quantityDigits: onlyDigits(quantityDigits) })}
                 />
               </View>
               <View style={styles.formHalf}>
                 <Text style={styles.modalLabel}>Unidade</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.unitScroll}>
                   {UNITS.map(unit => (
-                    <TouchableOpacity key={unit} style={[styles.unitChip, editingHistoryItem?.unit === unit && styles.unitChipSelected]} onPress={() => setEditingHistoryItem({ ...editingHistoryItem, unit, priceUnit: unit })}>
-                      <Text style={[styles.unitChipText, editingHistoryItem?.unit === unit && styles.unitChipTextSelected]}>{unit}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
+                    <TouchableOpacity key={unit} style={[styles.unitChip, editingHistoryItem?.unit === unit && styles.unitChipSelected]} onPress={() => {
+                      const previousUnit = editingHistoryItem?.unit || 'un';
+                      const previousValue = parseQuantityInput(editingHistoryItem?.quantityDigits, previousUnit);
+                      const nextValue = ['kg', 'g'].includes(previousUnit) && ['kg', 'g'].includes(unit)
+                        ? (unit === 'kg' ? previousValue / 1000 : previousValue * 1000)
+                        : ['L', 'mL'].includes(previousUnit) && ['L', 'mL'].includes(unit)
+                          ? (unit === 'L' ? previousValue / 1000 : previousValue * 1000)
+                          : previousValue;
+                      setEditingHistoryItem({ ...editingHistoryItem, unit, quantityDigits: quantityDigitsFromValue(nextValue, unit), priceUnit: unit });
+                    }}>
+                  <Text style={[styles.unitChipText, editingHistoryItem?.unit === unit && styles.unitChipTextSelected]}>{unit}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Text style={styles.quantityHelper}>{editingHistoryItem?.unit === 'kg' ? 'Digite em gramas: 780 = 0,780 kg; 1700 = 1,700 kg.' : editingHistoryItem?.unit === 'g' ? 'Digite em gramas: 780 = 780 g.' : editingHistoryItem?.unit === 'L' ? 'Digite em mililitros: 1500 = 1,500 L.' : editingHistoryItem?.unit === 'mL' ? 'Digite em mililitros: 1500 = 1500 mL.' : 'Digite apenas números.'}</Text>
+          </View>
             </View>
             <Text style={styles.modalLabel}>Como o preço foi registrado?</Text>
             <View style={styles.choiceRow}>
@@ -651,7 +675,7 @@ export default function HistoryScreen() {
             <View style={styles.formRow}>
               <View style={styles.formHalf}>
                 <Text style={styles.modalLabel}>Quantidade</Text>
-                <TextInput style={styles.formInput} placeholder="Ex.: 780" placeholderTextColor="#8888aa" keyboardType="decimal-pad" value={newHistoryItem.quantity} onChangeText={(quantity) => setNewHistoryItem({ ...newHistoryItem, quantity })} />
+                <TextInput style={styles.formInput} placeholder="Ex.: 780" placeholderTextColor="#8888aa" keyboardType="number-pad" value={formatQuantityDigits(newHistoryItem.quantityDigits, newHistoryItem.unit)} onChangeText={(quantityDigits) => setNewHistoryItem({ ...newHistoryItem, quantityDigits: onlyDigits(quantityDigits) })} />
               </View>
               <View style={styles.formHalf}>
                 <Text style={styles.modalLabel}>Unidade</Text>
@@ -662,6 +686,7 @@ export default function HistoryScreen() {
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
+                <Text style={styles.quantityHelper}>{newHistoryItem.unit === 'kg' ? 'Digite em gramas: 780 = 0,780 kg; 1700 = 1,700 kg.' : newHistoryItem.unit === 'g' ? 'Digite em gramas: 780 = 780 g.' : 'Digite apenas números.'}</Text>
               </View>
             </View>
             <Text style={styles.modalLabel}>Valor total pago pelo item</Text>
@@ -873,6 +898,7 @@ const styles = StyleSheet.create({
   editModalContent: { backgroundColor: '#1a1a2e', borderRadius: 20, padding: 20, margin: 20 },
   editHelper: { color: '#aaaac0', fontSize: 13, lineHeight: 18, marginBottom: 14 },
   formInput: { backgroundColor: '#2a2a4e', color: '#fff', paddingHorizontal: 13, paddingVertical: 11, borderRadius: 10, fontSize: 16, marginBottom: 4 },
+  quantityHelper: { color: '#777799', fontSize: 10, lineHeight: 14, marginTop: 3, marginBottom: 4 },
   mergeScroll: { marginBottom: 6 },
   mergeChip: { paddingHorizontal: 11, paddingVertical: 9, borderRadius: 9, backgroundColor: '#2a2a4e', marginRight: 7, maxWidth: 245 },
   mergeChipSelected: { backgroundColor: '#357c38' },

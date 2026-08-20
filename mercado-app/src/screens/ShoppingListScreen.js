@@ -16,7 +16,38 @@ const moneyDigitsFromValue = (value) => {
   if (value === null || value === undefined || value === '') return '';
   return String(Math.round(Number(value) * 100));
 };
-const parseQuantity = (value) => Number.parseFloat(String(value || '').replace(',', '.')) || 0;
+const getQuantityScale = (unit) => unit === 'kg' || unit === 'L' ? 1000 : 1;
+const getQuantityFamily = (unit) => ['kg', 'g'].includes(unit) ? 'weight' : ['L', 'mL'].includes(unit) ? 'volume' : 'count';
+const parseQuantityInput = (digits, unit) => {
+  const numeric = Number(onlyDigits(digits));
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric / getQuantityScale(unit);
+};
+const quantityDigitsFromValue = (value, unit) => {
+  if (value === null || value === undefined || value === '') return '';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  return String(Math.round(numeric * getQuantityScale(unit)));
+};
+const formatQuantityDigits = (digits, unit) => {
+  const numeric = Number(onlyDigits(digits));
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  if (getQuantityScale(unit) === 1000) return (numeric / 1000).toFixed(3).replace('.', ',');
+  return String(numeric);
+};
+const convertQuantityValue = (value, fromUnit, toUnit) => {
+  if (!value) return '';
+  if (getQuantityFamily(fromUnit) !== getQuantityFamily(toUnit)) return '';
+  const baseValue = getQuantityScale(fromUnit) === 1000 ? value * 1000 : value;
+  return getQuantityScale(toUnit) === 1000 ? baseValue / 1000 : baseValue;
+};
+const getQuantityHelper = (unit) => {
+  if (unit === 'kg') return 'Digite apenas os gramas: 780 = 0,780 kg; 1700 = 1,700 kg.';
+  if (unit === 'g') return 'Digite apenas os gramas: 780 = 780 g.';
+  if (unit === 'L') return 'Digite apenas os mililitros: 1500 = 1,500 L.';
+  if (unit === 'mL') return 'Digite apenas os mililitros: 1500 = 1500 mL.';
+  return 'Digite apenas números.';
+};
 
 export default function ShoppingListScreen() {
   const insets = useSafeAreaInsets();
@@ -36,7 +67,7 @@ export default function ShoppingListScreen() {
   const [suggestions, setSuggestions] = useState([]);
   const [mainSearchQuery, setMainSearchQuery] = useState('');
   const [mainSuggestions, setMainSuggestions] = useState([]);
-  const [purchaseData, setPurchaseData] = useState({ priceDigits: '', quantity: '', unit: 'un', priceMode: 'total', isPromotion: false, originalPriceDigits: '', marketName: '' });
+  const [purchaseData, setPurchaseData] = useState({ priceDigits: '', quantityDigits: '', unit: 'un', priceMode: 'total', isPromotion: false, originalPriceDigits: '', marketName: '' });
   const [unitModalVisible, setUnitModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
@@ -182,7 +213,7 @@ export default function ShoppingListScreen() {
       name: item.name || '',
       brand: item.brand || '',
       category: item.category || 'outros',
-      quantity: item.quantity === null || item.quantity === undefined ? '' : String(item.quantity),
+      quantityDigits: quantityDigitsFromValue(item.quantity, unit),
       unit,
       priceMode: item.priceMode || (WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total'),
       priceUnit: item.priceUnit || getDefaultPriceUnit(unit),
@@ -209,11 +240,17 @@ export default function ShoppingListScreen() {
 
   const chooseUnit = (unit) => {
     if (unitPickerTarget === 'edit') {
+      const currentUnit = editingItem?.unit || 'un';
+      const currentValue = parseQuantityInput(editingItem?.quantityDigits, currentUnit);
+      const convertedValue = convertQuantityValue(currentValue, currentUnit, unit);
       const priceMode = WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total';
-      setEditingItem({ ...editingItem, unit, priceMode, priceUnit: getDefaultPriceUnit(unit) });
+      setEditingItem({ ...editingItem, unit, quantityDigits: quantityDigitsFromValue(convertedValue, unit), priceMode, priceUnit: getDefaultPriceUnit(unit) });
     } else {
+      const currentUnit = purchaseData.unit || 'un';
+      const currentValue = parseQuantityInput(purchaseData.quantityDigits, currentUnit);
+      const convertedValue = convertQuantityValue(currentValue, currentUnit, unit);
       const priceMode = WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total';
-      setPurchaseData({ ...purchaseData, unit, priceMode, priceUnit: getDefaultPriceUnit(unit) });
+      setPurchaseData({ ...purchaseData, unit, quantityDigits: quantityDigitsFromValue(convertedValue, unit), priceMode, priceUnit: getDefaultPriceUnit(unit) });
     }
     setUnitModalVisible(false);
   };
@@ -245,7 +282,7 @@ export default function ShoppingListScreen() {
       return;
     }
 
-    const quantity = Number.parseFloat(String(editingItem.quantity || '').replace(',', '.'));
+    const quantity = parseQuantityInput(editingItem.quantityDigits, editingItem.unit);
     const currentItem = shoppingList.find(item => item.id === editingItem.id);
     if (currentItem?.status === 'purchased' && (!quantity || quantity <= 0)) {
       Alert.alert('Erro', 'Uma compra já registrada precisa ter uma quantidade válida');
@@ -282,12 +319,12 @@ export default function ShoppingListScreen() {
 
     setSelectedItem(item);
     const priceMode = item.priceMode || (WEIGHT_VOLUME_UNITS.includes(unit) ? 'unit' : 'total');
-    const initialQuantity = item.quantity === null || item.quantity === undefined || (WEIGHT_VOLUME_UNITS.includes(unit) && item.quantity === 1 && !item.price && !item.priceMode)
+    const initialQuantityDigits = item.quantity === null || item.quantity === undefined || (WEIGHT_VOLUME_UNITS.includes(unit) && item.quantity === 1 && !item.price && !item.priceMode)
       ? ''
-      : String(item.quantity);
+      : quantityDigitsFromValue(item.quantity, unit);
     setPurchaseData({
       priceDigits: moneyDigitsFromValue(item.price),
-      quantity: initialQuantity,
+      quantityDigits: initialQuantityDigits,
       unit,
       priceMode,
       priceUnit: item.priceUnit || getDefaultPriceUnit(unit),
@@ -299,7 +336,7 @@ export default function ShoppingListScreen() {
   };
 
   const handleConfirmPurchase = async () => {
-    const quantity = Number.parseFloat(String(purchaseData.quantity || '').replace(',', '.'));
+    const quantity = parseQuantityInput(purchaseData.quantityDigits, purchaseData.unit);
     const price = parseMoneyDigits(purchaseData.priceDigits);
     if (purchaseData.priceDigits && (!quantity || quantity <= 0)) {
       Alert.alert('Erro', 'Informe a quantidade para calcular o valor da compra');
@@ -503,8 +540,10 @@ export default function ShoppingListScreen() {
     );
   };
 
+  const previewQuantity = parseQuantityInput(purchaseData.quantityDigits, purchaseData.unit);
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={[styles.container, { paddingTop: insets.top }]} >
       {/* Barra fixa: fica abaixo do relógio, bateria e demais ícones do sistema. */}
       <View style={styles.header}>
         <View style={styles.headerCopy}>
@@ -800,10 +839,11 @@ export default function ShoppingListScreen() {
                 style={styles.input}
                 placeholder="Opcional até passar no caixa"
                 placeholderTextColor="#8888aa"
-                keyboardType="decimal-pad"
-                value={editingItem?.quantity || ''}
-                onChangeText={(quantity) => setEditingItem({ ...editingItem, quantity })}
+                keyboardType="number-pad"
+                value={formatQuantityDigits(editingItem?.quantityDigits, editingItem?.unit)}
+                onChangeText={(quantityDigits) => setEditingItem({ ...editingItem, quantityDigits: onlyDigits(quantityDigits) })}
               />
+              <Text style={styles.helperText}>{getQuantityHelper(editingItem?.unit)}</Text>
 
               <Text style={styles.label}>Unidade de compra</Text>
               <TouchableOpacity style={styles.unitField} onPress={() => openUnitPicker('edit')}>
@@ -880,9 +920,9 @@ export default function ShoppingListScreen() {
               onChangeText={(value) => setPurchaseData({ ...purchaseData, priceDigits: onlyDigits(value) })}
             />
             <Text style={styles.helperText}>{purchaseData.priceMode === 'unit' && purchaseData.unit !== purchaseData.priceUnit ? `Quantidade em ${purchaseData.unit} será convertida para ${purchaseData.priceUnit}. ` : ''}Opcional no planejamento. Digite só os números: 800 = R$ 8,00; 8 = R$ 0,08.</Text>
-            {purchaseData.priceMode === 'unit' && purchaseData.priceDigits && purchaseData.quantity && (
+            {purchaseData.priceMode === 'unit' && purchaseData.priceDigits && purchaseData.quantityDigits && (
               <Text style={styles.previewText}>
-                Total estimado: R$ {getItemTotal({ price: parseMoneyDigits(purchaseData.priceDigits), priceMode: 'unit', priceIsTotal: false, quantity: parseQuantity(purchaseData.quantity), unit: purchaseData.unit, priceUnit: purchaseData.priceUnit }).toFixed(2).replace('.', ',')}
+                Total estimado: R$ {getItemTotal({ price: parseMoneyDigits(purchaseData.priceDigits), priceMode: 'unit', priceIsTotal: false, quantity: previewQuantity, unit: purchaseData.unit, priceUnit: purchaseData.priceUnit }).toFixed(2).replace('.', ',')}
               </Text>
             )}
             
@@ -891,9 +931,9 @@ export default function ShoppingListScreen() {
                 style={[styles.input, { flex: 1 }]}
                 placeholder={`Quantidade (${purchaseData.unit})`}
                 placeholderTextColor="#8888aa"
-                keyboardType="decimal-pad"
-                value={purchaseData.quantity}
-                onChangeText={(text) => setPurchaseData({ ...purchaseData, quantity: text })}
+                keyboardType="number-pad"
+                value={formatQuantityDigits(purchaseData.quantityDigits, purchaseData.unit)}
+                onChangeText={(text) => setPurchaseData({ ...purchaseData, quantityDigits: onlyDigits(text) })}
               />
               <TouchableOpacity style={styles.unitFieldCompact} onPress={() => openUnitPicker('purchase')}>
                 <Ionicons name="options-outline" size={18} color="#4CAF50" />
@@ -901,6 +941,7 @@ export default function ShoppingListScreen() {
                 <Ionicons name="chevron-down" size={14} color="#aaaac0" />
               </TouchableOpacity>
             </View>
+            <Text style={styles.helperText}>{getQuantityHelper(purchaseData.unit)}</Text>
             
             <View style={styles.promotionRow}>
               <TouchableOpacity 
@@ -923,12 +964,12 @@ export default function ShoppingListScreen() {
               />
             )}
             
-            {purchaseData.priceDigits && purchaseData.originalPriceDigits && purchaseData.quantity && (
+            {purchaseData.priceDigits && purchaseData.originalPriceDigits && purchaseData.quantityDigits && (
               <View style={styles.savingsContainer}>
                 <Text style={styles.savingsText}>
                   Economia: R$ {(
-                    getItemTotal({ price: parseMoneyDigits(purchaseData.originalPriceDigits), priceMode: purchaseData.priceMode, priceIsTotal: purchaseData.priceMode !== 'unit', quantity: parseQuantity(purchaseData.quantity), unit: purchaseData.unit, priceUnit: purchaseData.priceUnit }) -
-                    getItemTotal({ price: parseMoneyDigits(purchaseData.priceDigits), priceMode: purchaseData.priceMode, priceIsTotal: purchaseData.priceMode !== 'unit', quantity: parseQuantity(purchaseData.quantity), unit: purchaseData.unit, priceUnit: purchaseData.priceUnit })
+                    getItemTotal({ price: parseMoneyDigits(purchaseData.originalPriceDigits), priceMode: purchaseData.priceMode, priceIsTotal: purchaseData.priceMode !== 'unit', quantity: previewQuantity, unit: purchaseData.unit, priceUnit: purchaseData.priceUnit }) -
+                    getItemTotal({ price: parseMoneyDigits(purchaseData.priceDigits), priceMode: purchaseData.priceMode, priceIsTotal: purchaseData.priceMode !== 'unit', quantity: previewQuantity, unit: purchaseData.unit, priceUnit: purchaseData.priceUnit })
                   ).toFixed(2).replace('.', ',')}
                 </Text>
               </View>
